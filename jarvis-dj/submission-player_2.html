@@ -403,20 +403,22 @@ function scheduleFollowing() {
       }
     }
 
-    // Check if we should tempo match
-    const currentPos = positionNow();
-    const timeToTransition = transitionTime - currentPos;
-    const bpmDifference = Math.abs(track.bpm - nextTrack.bpm);
+    // Check if we should tempo match (only if playing)
+    if (state === "playing") {
+      const currentPos = positionNow();
+      const timeToTransition = transitionTime - currentPos;
+      const bpmDifference = Math.abs(track.bpm - nextTrack.bpm);
 
-    // Safety margin: need 4+ seconds for tempo matching
-    const SAFETY_MARGIN = 4.0;
-    // Reasonable BPM difference for tempo matching (not too extreme)
-    const MAX_BPM_DIFFERENCE = 30;
+      // Safety margin: need 4+ seconds for tempo matching
+      const SAFETY_MARGIN = 4.0;
+      // Reasonable BPM difference for tempo matching (not too extreme)
+      const MAX_BPM_DIFFERENCE = 30;
 
-    if (timeToTransition >= SAFETY_MARGIN && bpmDifference <= MAX_BPM_DIFFERENCE && bpmDifference > 0) {
-      needsTempoMatch = true;
-      // Tempo ramp duration: 5-10 seconds, but leave 1 second for crossfade
-      tempoRampDuration = Math.min(timeToTransition - 1.0, 10.0);
+      if (timeToTransition >= SAFETY_MARGIN && bpmDifference <= MAX_BPM_DIFFERENCE && bpmDifference > 0) {
+        needsTempoMatch = true;
+        // Tempo ramp duration: 5-10 seconds, but leave 1 second for crossfade
+        tempoRampDuration = Math.min(timeToTransition - 1.0, 10.0);
+      }
     }
   }
 
@@ -473,12 +475,8 @@ function commitTransition() {
   const n = scheduledNext;
   if (!n) return;
 
-  // Stop old source properly
-  if (activeSource && activeSource !== n.source) {
-    stopSource(activeSource);
-  }
-
-  // Update to new track
+  // The old source will naturally fade out via the crossfade we scheduled
+  // Just update our references to the new source
   activeSource = n.source;
   activeGain = n.source.gain;
   currentIndex = n.index;
@@ -1039,7 +1037,8 @@ function updateCard() {
       modeInfo += ` <span style="color:var(--yellow)">♪ start ${fmt(track.phraseStart)}</span>`;
     }
     if (scheduledNext && scheduledNext.transitionTime) {
-      const beatsRemaining = Math.round((scheduledNext.transitionTime - pos) / (60 / (track.bpm || 120)));
+      const currentPos = positionNow();
+      const beatsRemaining = Math.round((scheduledNext.transitionTime - currentPos) / (60 / (track.bpm || 120)));
       if (beatsRemaining > 0 && beatsRemaining <= 16) {
         modeInfo += ` <span style="color:var(--orange)">↓ ${beatsRemaining} beats</span>`;
       }
