@@ -44,6 +44,28 @@
     display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(30,24,44,0.6);
     border: 1px solid var(--glass-border); border-radius: 12px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: 13px;
   }
+  .sfx-panel {
+    position: fixed; bottom: 16px; right: 16px; z-index: 50;
+    display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(30,24,44,0.7);
+    border: 1px solid var(--glass-border); border-radius: 16px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 12px 32px rgba(20,10,40,0.4);
+  }
+  .sfx-panel .label { font-size: 10px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .sfx-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sfx-btn {
+    font-family: var(--font); font-size: 11px; border: 1px solid var(--glass-border);
+    background: rgba(255,255,255,0.08); color: #fff; padding: 8px 10px; border-radius: 8px;
+    cursor: pointer; transition: all var(--t-fast); text-align: center;
+  }
+  .sfx-btn:hover { background: rgba(255,255,255,0.15); transform: scale(1.02); }
+  .sfx-btn:active, .sfx-btn.active { background: var(--orange); border-color: var(--orange); transform: scale(0.97); }
+  .sfx-btn.filter-btn { background: rgba(71,209,106,0.2); }
+  .sfx-btn.filter-btn:hover { background: rgba(71,209,106,0.3); }
+  .sfx-btn.filter-btn.active { background: var(--green); border-color: var(--green); }
+  .sfx-slider-container { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .sfx-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; outline: none; }
+  .sfx-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--needle); border-radius: 50%; cursor: pointer; }
+  .sfx-slider::-moz-range-thumb { width: 14px; height: 14px; background: var(--needle); border-radius: 50%; cursor: pointer; border: none; }
   .toolbar button, .toolbar label {
     font-family: var(--font); font-size: 13px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.1);
     color: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: background var(--t-fast), transform var(--t-fast);
@@ -86,6 +108,23 @@
   .needle {
     position: absolute; top: 4%; bottom: 4%; left: 50%; width: 2px; margin-left: -1px; background: var(--needle);
     box-shadow: 0 0 12px 1px rgba(255,211,107,0.95); pointer-events: none; z-index: 3;
+    transition: left 0.1s linear;
+  }
+  .transition-marker {
+    position: absolute; top: 4%; bottom: 4%; width: 3px; background: rgba(255,80,80,0.8);
+    box-shadow: 0 0 10px 2px rgba(255,80,80,0.6); pointer-events: none; z-index: 3;
+  }
+  .last-beat-marker {
+    position: absolute; top: 4%; bottom: 4%; width: 2px; background: rgba(255,200,50,0.6);
+    box-shadow: 0 0 8px 1px rgba(255,200,50,0.4); pointer-events: none; z-index: 2;
+  }
+  .beat-counter {
+    position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-weight: 800; letter-spacing: 1px; color: rgba(255,255,255,0.7);
+    pointer-events: none; z-index: 4;
+  }
+  .beat-counter .current-beat {
+    color: var(--needle); font-size: 14px;
   }
   .wave-glow {
     position: absolute; inset: -20px; border-radius: 24px; pointer-events: none; opacity: 0;
@@ -112,6 +151,27 @@
     display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--tile-glass);
     border: 1px solid var(--glass-border); border-radius: 16px; backdrop-filter: blur(10px) saturate(1.15); -webkit-backdrop-filter: blur(10px) saturate(1.15);
     box-shadow: 0 18px 40px rgba(20,10,40,0.35), inset 0 1px 0 var(--glass-hi);
+  }
+  .next-card {
+    --depth: 40px; --drift: 18; position: absolute; top: 118px; left: 50%; margin-left: 155px; width: 240px; z-index: 4;
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(40,32,60,0.4);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 12px 28px rgba(20,10,40,0.25); opacity: 0.8; transition: opacity 0.3s, transform 0.3s;
+  }
+  .next-card:hover { opacity: 1; transform: scale(1.02); }
+  .next-card .avatar { width: 36px; height: 36px; font-size: 14px; }
+  .next-card .meta { flex: 1; min-width: 0; }
+  .next-card .name { font-size: 13px; opacity: 0.9; }
+  .next-card .next-label { font-size: 9px; letter-spacing: 1px; color: var(--orange); text-transform: uppercase; font-weight: 700; }
+  .next-card .bpm-match { font-size: 10px; color: rgba(255,255,255,0.6); }
+  .big-emoji-burst {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 120px; z-index: 1000;
+    pointer-events: none; animation: burstPulse 0.8s ease-out forwards; text-shadow: 0 0 60px rgba(255,255,255,0.8);
+  }
+  @keyframes burstPulse {
+    0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+    30% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(1.8); opacity: 0; }
   }
   .sub-card .avatar {
     width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%;
@@ -188,7 +248,9 @@
         <div class="rolling" id="rolling-wrap">
           <div class="wave-glow" id="waveGlow"></div>
           <canvas id="rolling"></canvas>
-          <div class="needle"></div>
+          <div class="needle" id="needle"></div>
+          <div class="last-beat-marker" id="lastBeatMarker" style="display: none;"></div>
+          <div class="transition-marker" id="transitionMarker" style="display: none;"></div>
           <span class="tstamp start" id="tStart">0:00</span>
           <span class="tstamp now" id="tNow">0:00</span>
           <span class="tstamp end" id="tEnd">0:00</span>
@@ -208,6 +270,15 @@
         </div>
         <div class="pips"><b></b><b></b><b></b><b></b></div>
         <span class="tier">SILVER</span>
+      </div>
+
+      <div class="next-card layer" id="nextCard" style="display: none;">
+        <div class="avatar">⏭</div>
+        <div class="meta">
+          <div class="next-label">NEXT UP</div>
+          <div class="name" id="nextTrackName">—</div>
+          <div class="bpm-match" id="nextTrackInfo">—</div>
+        </div>
       </div>
 
       <div class="transport layer">
@@ -232,7 +303,21 @@
     </div>
   </div>
 
-  <div class="hint">load tracks &middot; drag either waveform to scrub &middot; spam reactions to hype the wave &middot; tracks auto-join on the beat</div>
+  <div class="hint">load tracks &middot; drag waveforms to scrub &middot; spam reactions to hype &middot; next track appears in red &middot; use DJ FX panel</div>
+
+  <div class="sfx-panel">
+    <div class="label">DJ FX</div>
+    <div class="sfx-controls">
+      <button class="sfx-btn" id="sfx-echo">Echo</button>
+      <button class="sfx-btn" id="sfx-reverb">Reverb</button>
+      <button class="sfx-btn filter-btn" id="sfx-lowpass">Low Pass</button>
+      <button class="sfx-btn filter-btn" id="sfx-highpass">High Pass</button>
+    </div>
+    <div class="sfx-slider-container">
+      <label style="font-size: 10px; color: var(--muted);">FX Mix</label>
+      <input type="range" class="sfx-slider" id="sfx-mix" min="0" max="100" value="30">
+    </div>
+  </div>
 
 <script>
 "use strict";
@@ -256,6 +341,25 @@ let state = "idle";
 let dragging = false;
 let tally = { clap: 0, fire: 0, good: 0 };
 
+// DJ FX system
+let fxBus = null;
+let fxNodes = {
+  echo: null,
+  reverb: null,
+  lowpass: null,
+  highpass: null,
+  mixGain: null,
+  dryGain: null,
+  wetGain: null
+};
+let fxState = {
+  echo: false,
+  reverb: false,
+  lowpass: false,
+  highpass: false,
+  mix: 0.3
+};
+
 // hype
 let hype = 0;
 let hypeRGB = [255,255,255];
@@ -271,11 +375,154 @@ const fxctx = fxCanvas.getContext("2d");
 
 /* ---------- engine ---------- */
 function ensureCtx() {
-  if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination); }
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain();
+    master.gain.value = 1;
+
+    // Initialize DJ FX chain
+    initFX();
+    master.connect(fxNodes.dryGain);
+    fxNodes.dryGain.connect(ctx.destination);
+    fxNodes.wetGain.connect(ctx.destination);
+  }
   if (ctx.state === "suspended") ctx.resume();
 }
-function cueOffset(i) { const t = queue[i]; return bpmMode ? t.bpmCue : t.onsetCue; }
-function makeSource(i) { const s = ctx.createBufferSource(); s.buffer = queue[i].buffer; s.connect(master); return s; }
+
+function initFX() {
+  // Dry/wet mix
+  fxNodes.dryGain = ctx.createGain();
+  fxNodes.wetGain = ctx.createGain();
+  fxNodes.dryGain.gain.value = 1 - fxState.mix;
+  fxNodes.wetGain.gain.value = fxState.mix;
+
+  // FX bus
+  fxBus = ctx.createGain();
+  fxBus.gain.value = 1;
+  fxBus.connect(fxNodes.wetGain);
+
+  // Echo (delay) effect
+  fxNodes.echo = ctx.createDelay(1.5);
+  fxNodes.echo.delayTime.value = 0.4;
+  const echoFeedback = ctx.createGain();
+  echoFeedback.gain.value = 0.4;
+  const echoFilter = ctx.createBiquadFilter();
+  echoFilter.type = "lowpass";
+  echoFilter.frequency.value = 2000;
+
+  fxNodes.echo.connect(echoFeedback);
+  echoFeedback.connect(echoFilter);
+  echoFilter.connect(fxNodes.echo);
+  fxNodes.echo.connect(fxBus);
+
+  // Simple reverb (using convolver would be better, but delay-based works)
+  fxNodes.reverb = ctx.createDelay(0.1);
+  fxNodes.reverb.delayTime.value = 0.02;
+  const reverbFeedback = ctx.createGain();
+  reverbFeedback.gain.value = 0.8;
+  const reverbFilter = ctx.createBiquadFilter();
+  reverbFilter.type = "highpass";
+  reverbFilter.frequency.value = 500;
+
+  fxNodes.reverb.connect(reverbFeedback);
+  reverbFeedback.connect(reverbFilter);
+  reverbFilter.connect(fxNodes.reverb);
+  fxNodes.reverb.connect(fxBus);
+
+  // Low pass filter
+  fxNodes.lowpass = ctx.createBiquadFilter();
+  fxNodes.lowpass.type = "lowpass";
+  fxNodes.lowpass.frequency.value = 20000;
+  fxNodes.lowpass.Q.value = 1;
+  fxNodes.lowpass.connect(fxBus);
+
+  // High pass filter
+  fxNodes.highpass = ctx.createBiquadFilter();
+  fxNodes.highpass.type = "highpass";
+  fxNodes.highpass.frequency.value = 20;
+  fxNodes.highpass.Q.value = 1;
+  fxNodes.highpass.connect(fxBus);
+
+  // Master connection from source to FX
+  master.disconnect();
+  master.connect(fxNodes.dryGain);
+  master.connect(fxNodes.echo);
+  master.connect(fxNodes.reverb);
+  master.connect(fxNodes.lowpass);
+  master.connect(fxNodes.highpass);
+}
+
+function toggleFX(type, button) {
+  fxState[type] = !fxState[type];
+  button.classList.toggle("active", fxState[type]);
+
+  const now = ctx.currentTime;
+
+  switch(type) {
+    case "echo":
+      fxNodes.echo.delayTime.cancelScheduledValues(now);
+      if (fxState[type]) {
+        fxNodes.echo.delayTime.setValueAtTime(0.4, now);
+        fxNodes.echo.delayTime.exponentialRampToValueAtTime(0.001, now + 0.1);
+        fxNodes.echo.delayTime.setValueAtTime(0.4, now + 0.15);
+      } else {
+        fxNodes.echo.delayTime.exponentialRampToValueAtTime(0.001, now + 0.2);
+      }
+      break;
+    case "reverb":
+      // Simple reverb toggle
+      break;
+    case "lowpass":
+      fxNodes.lowpass.frequency.cancelScheduledValues(now);
+      if (fxState[type]) {
+        fxNodes.lowpass.frequency.exponentialRampToValueAtTime(800, now + 0.3);
+      } else {
+        fxNodes.lowpass.frequency.exponentialRampToValueAtTime(20000, now + 0.3);
+      }
+      break;
+    case "highpass":
+      fxNodes.highpass.frequency.cancelScheduledValues(now);
+      if (fxState[type]) {
+        fxNodes.highpass.frequency.exponentialRampToValueAtTime(200, now + 0.3);
+      } else {
+        fxNodes.highpass.frequency.exponentialRampToValueAtTime(20, now + 0.3);
+      }
+      break;
+  }
+}
+
+function updateFXMix(value) {
+  fxState.mix = value / 100;
+  const now = ctx.currentTime;
+  fxNodes.dryGain.gain.cancelScheduledValues(now);
+  fxNodes.wetGain.gain.cancelScheduledValues(now);
+  fxNodes.dryGain.gain.linearRampToValueAtTime(1 - fxState.mix, now + 0.05);
+  fxNodes.wetGain.gain.linearRampToValueAtTime(fxState.mix, now + 0.05);
+}
+function cueOffset(i) {
+  const t = queue[i];
+  if (!t) return 0;
+  if (bpmMode && t.phraseStart !== null) return t.phraseStart;
+  if (bpmMode && t.firstKickPoint !== null) return t.firstKickPoint;
+  if (bpmMode) return t.bpmCue;
+  return t.onsetCue;
+}
+function transitionPoint(i) {
+  const t = queue[i];
+  if (!t) return t ? t.duration : 0;
+  if (bpmMode && t.lastBeatPoint !== null) return t.lastBeatPoint;
+  return t.duration;
+}
+function makeSource(i) {
+  const s = ctx.createBufferSource();
+  s.buffer = queue[i].buffer;
+  if (ctx && fxNodes.dryGain) {
+    s.connect(master);
+  } else {
+    s.connect(master);
+  }
+  return s;
+}
 function stopSource(s) { if (s) { try { s.onended = null; s.stop(); } catch (e) {} } }
 function clearScheduled() { if (scheduledNext) { stopSource(scheduledNext.source); scheduledNext = null; } }
 
@@ -288,20 +535,72 @@ function startTrack(i, atTime, offset, doScheduleNext = true) {
 }
 function scheduleFollowing() {
   clearScheduled();
-  const buf = queue[currentIndex].buffer;
-  const endTime = anchorCtxTime + (buf.duration - anchorPos);
+  const track = queue[currentIndex];
+  const nextTrack = queue[currentIndex + 1];
+  if (!track || !nextTrack) return;
+
   const nextIdx = currentIndex + 1;
-  if (nextIdx >= queue.length) return;
-  const cue = cueOffset(nextIdx);
-  const src = makeSource(nextIdx); src.start(endTime, cue);
-  scheduledNext = { source: src, index: nextIdx, startTime: endTime, offset: cue };
+  const nextCue = cueOffset(nextIdx);
+  const currentTransitionPoint = transitionPoint(currentIndex);
+
+  // Calculate perfect timing for beat alignment (beat 4 → beat 1)
+  let transitionTime = currentTransitionPoint;
+
+  if (bpmMode && track.bpm) {
+    const beatDuration = 60 / track.bpm;
+
+    // If we have a detected last beat point, use it
+    if (track.lastBeatPoint !== null) {
+      transitionTime = track.lastBeatPoint;
+    } else {
+      // Fallback: find the nearest beat 4 (multiple of 4 beats from a reference)
+      // Use phrase start as reference if available
+      const referencePoint = track.phraseStart || 0;
+      const beatsFromReference = Math.round((currentTransitionPoint - referencePoint) / beatDuration);
+      const beatInBar = beatsFromReference % 4;
+
+      // Calculate time to next beat 4
+      if (beatInBar !== 3) {
+        const beatsToBeat4 = 3 - beatInBar;
+        transitionTime = currentTransitionPoint + (beatsToBeat4 * beatDuration);
+      }
+    }
+  }
+
+  const endTime = anchorCtxTime + (transitionTime - anchorPos);
+
+  const src = makeSource(nextIdx);
+  src.start(endTime, nextCue);
+  scheduledNext = {
+    source: src,
+    index: nextIdx,
+    startTime: endTime,
+    offset: nextCue,
+    transitionTime: transitionTime
+  };
 }
 function commitTransition() {
   const topR = topReaction();
   const n = scheduledNext;
   activeSource = n.source; currentIndex = n.index; anchorCtxTime = n.startTime; anchorPos = n.offset;
   scheduledNext = null;
+
+  // Slingshot animation: snap needle back to center
+  const needle = $("needle");
+  needle.style.transition = "left 0.4s cubic-bezier(0.34,1.56,0.64,1)";
+  needle.style.left = "50%";
+  setTimeout(() => { needle.style.transition = "left 0.1s linear"; }, 450);
+
   runTransitionFX(topR); resetTally(); updateCard(); scheduleFollowing();
+
+  // Big emoji burst for most played reaction
+  if (topR && REACTIONS[topR]) {
+    const burst = document.createElement("div");
+    burst.className = "big-emoji-burst";
+    burst.textContent = REACTIONS[topR].emoji;
+    document.body.appendChild(burst);
+    setTimeout(() => burst.remove(), 900);
+  }
 }
 function positionNow() { if (state !== "playing") return anchorPos; return anchorPos + (ctx.currentTime - anchorCtxTime); }
 
@@ -368,7 +667,177 @@ function analyse(buffer) {
   let dbF = onF; const thr = 0.25 * maxFlux;
   for (let f = onF; f < frames - 1; f++) { if (flux[f] > thr && flux[f] >= flux[f - 1] && flux[f] >= flux[f + 1]) { dbF = f; break; } }
   const bpmCue = (dbF * hop) / sr;
-  return { onsetCue, bpm, bpmCue };
+
+  // DJ-style beat grid analysis
+  const beatGrid = detectBeatGrid(data, sr, bpm, flux, maxFlux);
+  const { lastBeatPoint, firstKickPoint, phraseStart } = analyzePhrasing(energy, flux, beatGrid, sr, hop, bpm, frames, maxE);
+
+  return { onsetCue, bpm, bpmCue, beatGrid, lastBeatPoint, firstKickPoint, phraseStart };
+}
+
+function detectBeatGrid(data, sr, bpm, flux, maxFlux) {
+  // Detect all strong beats throughout the track
+  const beatGrid = [];
+  const hop = 512;
+  const beatInterval = (60 / bpm) * sr; // samples per beat
+  const threshold = 0.2 * maxFlux;
+
+  for (let i = 0; i < flux.length; i += Math.floor(beatInterval / hop)) {
+    // Look for peak in local neighborhood
+    const windowSize = Math.floor(beatInterval / hop / 4);
+    let peakIdx = i;
+    let peakVal = flux[i];
+
+    for (let j = -windowSize; j <= windowSize && i + j < flux.length; j++) {
+      if (i + j >= 0 && flux[i + j] > peakVal) {
+        peakVal = flux[i + j];
+        peakIdx = i + j;
+      }
+    }
+
+    if (peakVal > threshold) {
+      beatGrid.push({
+        time: (peakIdx * hop) / sr,
+        strength: peakVal / maxFlux
+      });
+    }
+  }
+
+  return beatGrid;
+}
+
+function analyzePhrasing(energy, flux, beatGrid, sr, hop, bpm, frames, maxE) {
+  if (beatGrid.length === 0) return { lastBeatPoint: null, firstKickPoint: null, phraseStart: null };
+
+  const beatDuration = 60 / bpm;
+  const barDuration = beatDuration * 4; // 4 beats per bar
+
+  // Find first musical phrase (drum loop/vocal hook start)
+  // Look for stable 4-beat pattern with consistent energy
+  let phraseStart = null;
+  let firstKickPoint = null;
+
+  // Skip first ~8 beats (intro noise), then look for stable pattern
+  const startSearch = Math.floor(8 / beatDuration * sr / hop);
+  const endSearch = Math.min(Math.floor(32 / beatDuration * sr / hop), beatGrid.length);
+
+  for (let i = startSearch; i < endSearch; i++) {
+    // Check if we have 4 consecutive strong beats (a full bar)
+    let strongBeats = 0;
+    let totalStrength = 0;
+
+    for (let j = 0; j < 4 && i + j < beatGrid.length; j++) {
+      if (beatGrid[i + j].strength > 0.3) {
+        strongBeats++;
+        totalStrength += beatGrid[i + j].strength;
+      }
+    }
+
+    // Also check next bar to confirm it's a loop/phrase
+    let nextBarStrong = 0;
+    for (let j = 4; j < 8 && i + j < beatGrid.length; j++) {
+      if (beatGrid[i + j].strength > 0.3) {
+        nextBarStrong++;
+      }
+    }
+
+    // Found phrase: 4 strong beats + next bar also has activity
+    if (strongBeats >= 4 && nextBarStrong >= 3) {
+      phraseStart = beatGrid[i].time;
+      firstKickPoint = beatGrid[i].time;
+      break;
+    }
+  }
+
+  // Fallback: find first cluster of 4+ strong beats
+  if (!phraseStart) {
+    for (let i = startSearch; i < endSearch; i++) {
+      let consecutiveStrong = 0;
+      for (let j = 0; j < 8 && i + j < beatGrid.length; j++) {
+        if (beatGrid[i + j].strength > 0.35) {
+          consecutiveStrong++;
+        } else {
+          break;
+        }
+      }
+      if (consecutiveStrong >= 4) {
+        phraseStart = beatGrid[i].time;
+        firstKickPoint = beatGrid[i].time;
+        break;
+      }
+    }
+  }
+
+  // Ultimate fallback: first reasonably strong beat after 8 seconds
+  if (!phraseStart && beatGrid.length > 0) {
+    const minTime = 8.0;
+    for (let i = 0; i < beatGrid.length; i++) {
+      if (beatGrid[i].time >= minTime && beatGrid[i].strength > 0.3) {
+        phraseStart = beatGrid[i].time;
+        firstKickPoint = beatGrid[i].time;
+        break;
+      }
+    }
+  }
+
+  // Find last musical bar (beat 4 of last complete bar before fade)
+  let lastBeatPoint = null;
+
+  // Check last 25% of track for musical content ending
+  const endCheckStart = Math.floor(frames * 0.75);
+  let energyThreshold = 0;
+  for (let f = endCheckStart; f < frames; f++) {
+    energyThreshold = Math.max(energyThreshold, energy[f]);
+  }
+  energyThreshold *= 0.3; // 30% of max energy in ending section
+
+  // Find last beat above threshold, then back up to beat 4 of that bar
+  for (let i = beatGrid.length - 1; i >= 0; i--) {
+    const beatIdx = Math.floor(beatGrid[i].time * sr / hop);
+    if (beatIdx >= endCheckStart && energy[beatIdx] > energyThreshold) {
+      // This is a strong beat near the end
+      // Calculate which beat of the bar this is (0=beat1, 1=beat2, etc.)
+      const beatTime = beatGrid[i].time;
+      if (phraseStart !== null) {
+        const beatsFromPhraseStart = Math.round((beatTime - phraseStart) / beatDuration);
+        const beatInBar = beatsFromPhraseStart % 4;
+
+        // If this isn't beat 4, find the nearest beat 4 before it
+        if (beatInBar !== 3) {
+          const beatsToBeat4 = 3 - beatInBar;
+          const beat4Time = beatTime + (beatsToBeat4 * beatDuration);
+
+          // Check if this beat 4 exists and is still in the track
+          if (beat4Time < beatGrid[beatGrid.length - 1].time) {
+            lastBeatPoint = beat4Time;
+          } else {
+            lastBeatPoint = beatTime; // Use this beat as fallback
+          }
+        } else {
+          lastBeatPoint = beatTime; // Already beat 4
+        }
+      } else {
+        lastBeatPoint = beatTime; // No phrase detected, use this beat
+      }
+      break;
+    }
+  }
+
+  // Fallback: use 4th-to-last strong beat (likely beat 4 of a bar)
+  if (!lastBeatPoint && beatGrid.length >= 4) {
+    let strongCount = 0;
+    for (let i = beatGrid.length - 1; i >= 0; i--) {
+      if (beatGrid[i].strength > 0.4) {
+        strongCount++;
+        if (strongCount === 4) { // Found 4th strong beat from end
+          lastBeatPoint = beatGrid[i].time;
+          break;
+        }
+      }
+    }
+  }
+
+  return { lastBeatPoint, firstKickPoint, phraseStart };
 }
 function extractPeaks(buffer) {
   const data = buffer.getChannelData(0); const sr = buffer.sampleRate;
@@ -386,7 +855,12 @@ async function loadFiles(fileList) {
     try {
       const arr = await file.arrayBuffer(); const buffer = await ctx.decodeAudioData(arr);
       const { peaks, maxPeak } = extractPeaks(buffer); const a = analyse(buffer);
-      queue.push({ buffer, peaks, maxPeak, duration: buffer.duration, onsetCue: a.onsetCue, bpm: a.bpm, bpmCue: a.bpmCue, name: file.name.replace(/\.[^.]+$/, "") });
+      queue.push({
+        buffer, peaks, maxPeak, duration: buffer.duration,
+        onsetCue: a.onsetCue, bpm: a.bpm, bpmCue: a.bpmCue,
+        beatGrid: a.beatGrid, lastBeatPoint: a.lastBeatPoint, firstKickPoint: a.firstKickPoint, phraseStart: a.phraseStart,
+        name: file.name.replace(/\.[^.]+$/, "")
+      });
     } catch (e) { console.warn("decode failed for", file.name, e); }
   }
   $("subTotal").textContent = queue.length;
@@ -429,20 +903,101 @@ function drawRolling(pos) {
   const pps = w / WINDOW_SECONDS; const cx = w / 2; const mid = h / 2; const maxBar = h * 0.46;
   const BAR_PX = 3, barW = 2; const barDur = BAR_PX / pps;
   const track = queue[currentIndex];
+  const nextTrack = queue[currentIndex + 1];
   const pastCol = hype > 0.02 ? blend([120,118,145], hypeRGB, hype * 0.35, 0.6) : getVar("--wave-past");
   const futureCol = hype > 0.02 ? blend([255,255,255], hypeRGB, hype * 0.65, 0.95) : getVar("--wave-future");
+  const nextCol = "rgba(255,120,120,0.7)";
+
+  // Calculate transition point
+  let transitionTime = null;
+  let transitionX = null;
+  if (track && scheduledNext) {
+    transitionTime = scheduledNext.transitionTime || track.duration;
+    transitionX = cx + (transitionTime - pos) * pps;
+
+    // Draw transition marker if visible
+    const marker = $("transitionMarker");
+    if (transitionX > -10 && transitionX < w + 10) {
+      marker.style.display = "block";
+      marker.style.left = transitionX + "px";
+    } else {
+      marker.style.display = "none";
+    }
+
+    // Show last beat marker if in DJ mode
+    if (bpmMode && track && track.lastBeatPoint !== null) {
+      const lastBeatX = cx + (track.lastBeatPoint - pos) * pps;
+      const lastBeatMarker = $("lastBeatMarker");
+      if (lastBeatX > -10 && lastBeatX < w + 10) {
+        lastBeatMarker.style.display = "block";
+        lastBeatMarker.style.left = lastBeatX + "px";
+      } else {
+        lastBeatMarker.style.display = "none";
+      }
+    } else {
+      $("lastBeatMarker").style.display = "none";
+    }
+  } else {
+    $("transitionMarker").style.display = "none";
+    $("lastBeatMarker").style.display = "none";
+  }
+
+  // Slingshot effect: pull needle left as we approach transition
+  let needleOffset = 0;
+  if (transitionX !== null && transitionX < w - 50) {
+    const distanceToTransition = transitionX;
+    const pullStartDistance = 150; // Start pulling when transition is 150px from right edge
+    if (distanceToTransition < pullStartDistance) {
+      const pullAmount = 1 - (distanceToTransition / pullStartDistance);
+      needleOffset = -pullAmount * (w / 2 - 20); // Pull left, max to near left edge
+    }
+  }
+  $("needle").style.left = (50 + needleOffset * 100 / w) + "%";
+
+  // Draw current track waveform
   const kStart = Math.floor((pos - WINDOW_SECONDS / 2) / barDur) - 1;
   const kEnd = Math.ceil((pos + WINDOW_SECONDS / 2) / barDur) + 1;
+  const drawLimit = transitionTime !== null ? transitionTime : (track ? track.duration : Infinity);
+
   for (let k = kStart; k <= kEnd; k++) {
     const bt = k * barDur;
     const x = cx + (bt - pos) * pps;
-    if (x < -4 || x > w + 4) continue;
+    if (x < -4) continue;
+    if (x > w + 4) continue;
+    if (track && (bt < 0 || bt >= drawLimit)) continue;
+
     let amp;
-    if (track) { if (bt < 0 || bt >= track.duration) continue; amp = peakMax(track, bt, bt + barDur); }
+    if (track) { amp = peakMax(track, bt, bt + barDur); }
     else amp = idleAmp(bt + pos);
     const bh = Math.max(1.5, amp * maxBar);
     rctx.fillStyle = bt <= pos ? pastCol : futureCol;
     rctx.fillRect(x - barW / 2, mid - bh, barW, bh * 2);
+  }
+
+  // Draw next track waveform after transition marker
+  if (nextTrack && transitionX !== null && transitionX > -50 && transitionX < w + 50) {
+    const nextCue = cueOffset(currentIndex + 1);
+    const nextStartX = transitionX;
+    const nextStartPx = nextCue * pps; // pixels per second for next track
+
+    for (let k = kStart; k <= kEnd; k++) {
+      const bt = k * barDur;
+      const x = cx + (bt - pos) * pps;
+
+      // Only draw pixels to the right of the transition marker
+      const relativeX = x - nextStartX;
+      if (relativeX < -4) continue;
+      if (relativeX > w + 4) continue;
+
+      // Calculate time in next track (relativeX is pixels from transition)
+      const nextTime = nextCue + (relativeX / pps);
+      if (nextTime < 0 || nextTime >= nextTrack.duration) continue;
+
+      const amp = peakMax(nextTrack, nextTime, nextTime + barDur);
+      const bh = Math.max(1.5, amp * maxBar);
+      rctx.fillStyle = nextCol;
+      rctx.fillRect(x - barW / 2, mid - bh, barW, bh * 2);
+    }
   }
 }
 function drawOverview(pos) {
@@ -569,9 +1124,55 @@ function updateCard() {
   if (!track) { $("readout").textContent = "no tracks loaded"; return; }
   $("trackName").textContent = track.name.slice(0, 22);
   $("subN").textContent = currentIndex + 1;
-  const cue = bpmMode ? track.bpmCue : track.onsetCue;
-  $("analysisRead").innerHTML = "BPM " + (track.bpm || "—") + " <span>|</span> onset " + fmt(track.onsetCue) + " <span>|</span> cue " + fmt(cue) + (bpmMode ? " (beat)" : "");
+  const cue = cueOffset(currentIndex);
+  const trans = transitionPoint(currentIndex);
+
+  // Show DJ mode info
+  let modeInfo = "";
+  if (bpmMode) {
+    modeInfo = " (DJ)";
+    if (track.lastBeatPoint !== null) {
+      modeInfo += ` <span style="color:var(--green)">✓ end ${fmt(track.lastBeatPoint)}</span>`;
+    }
+    if (track.phraseStart !== null) {
+      modeInfo += ` <span style="color:var(--yellow)">♪ start ${fmt(track.phraseStart)}</span>`;
+    }
+    if (scheduledNext && scheduledNext.transitionTime) {
+      const beatsRemaining = Math.round((scheduledNext.transitionTime - pos) / (60 / (track.bpm || 120)));
+      if (beatsRemaining > 0 && beatsRemaining <= 16) {
+        modeInfo += ` <span style="color:var(--orange)">↓ ${beatsRemaining} beats</span>`;
+      }
+    }
+  }
+
+  $("analysisRead").innerHTML = "BPM " + (track.bpm || "—") + " <span>|</span> onset " + fmt(track.onsetCue) + " <span>|</span> cue " + fmt(cue) + modeInfo;
   $("readout").textContent = queue.length + " track" + (queue.length > 1 ? "s" : "") + " · #" + (currentIndex + 1);
+
+  // Update next track preview (hide since we show it in waveform now)
+  const nextIdx = currentIndex + 1;
+  const nextCard = $("nextCard");
+  if (nextIdx < queue.length) {
+    const next = queue[nextIdx];
+    $("nextTrackName").textContent = next.name.slice(0, 20);
+
+    // BPM match indicator
+    if (bpmMode && track.bpm && next.bpm) {
+      const bpmDiff = Math.abs(track.bpm - next.bpm);
+      if (bpmDiff === 0) {
+        $("nextTrackInfo").innerHTML = `<span style="color: var(--green)">● Perfect BPM match (${next.bpm})</span>`;
+      } else if (bpmDiff <= 2) {
+        $("nextTrackInfo").innerHTML = `<span style="color: var(--yellow)">◐ Close (${track.bpm} → ${next.bpm})</span>`;
+      } else {
+        $("nextTrackInfo").innerHTML = `<span style="color: rgba(255,255,255,0.5)">○ ${track.bpm} → ${next.bpm}</span>`;
+      }
+    } else {
+      $("nextTrackInfo").textContent = next.bpm ? `BPM ${next.bpm}` : "—";
+    }
+
+    nextCard.style.display = "none"; // Hidden since waveform shows next track
+  } else {
+    nextCard.style.display = "none";
+  }
 }
 
 /* ---------- main loop ---------- */
@@ -604,6 +1205,13 @@ $("fileInput").addEventListener("change", (e) => loadFiles(e.target.files));
 document.body.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drag-over"); });
 document.body.addEventListener("dragleave", (e) => { if (e.target === document.body) document.body.classList.remove("drag-over"); });
 document.body.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drag-over"); if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+// DJ FX controls
+$("sfx-echo").onclick = function() { toggleFX("echo", this); };
+$("sfx-reverb").onclick = function() { toggleFX("reverb", this); };
+$("sfx-lowpass").onclick = function() { toggleFX("lowpass", this); };
+$("sfx-highpass").onclick = function() { toggleFX("highpass", this); };
+$("sfx-mix").oninput = function() { updateFXMix(this.value); };
 
 /* ---------- scrub: rolling waveform (relative drag) ---------- */
 let lastScrub = 0;
