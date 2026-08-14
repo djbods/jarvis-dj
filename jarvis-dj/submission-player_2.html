@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Submission Player — v3</title>
+<style>
+  :root {
+    --bg-1: #3a2d5c; --bg-2: #6a4a7a; --bg-3: #c98ba0; --bg-glow: rgba(255,170,200,0.35);
+    --tile-glass: rgba(228,228,235,0.10);
+    --panel-glass: rgba(60,56,78,0.55);
+    --glass-border: rgba(255,255,255,0.28);
+    --glass-hi: rgba(255,255,255,0.5);
+    --wave-past: rgba(120,118,145,0.5);
+    --wave-future: rgba(255,255,255,0.92);
+    --needle: #ffd36b;
+    --text: #fff; --muted: rgba(255,255,255,0.62); --ink: #2a2436;
+    --orange: #ff7a2f; --green: #47d16a; --yellow: #ffcf47;
+    --silver: linear-gradient(180deg,#e8e8ef,#b9b9c8);
+    --t-fast: 0.15s ease;
+    --font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font); color: var(--text); display: grid; place-items: center; min-height: 100vh;
+    background:
+      radial-gradient(120% 90% at 80% -10%, var(--bg-glow), transparent 55%),
+      linear-gradient(165deg, var(--bg-1) 0%, var(--bg-2) 55%, var(--bg-3) 130%);
+    overflow: hidden;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0;
+    background: repeating-linear-gradient(180deg, transparent 0 5px, rgba(0,0,0,0.03) 5px 6px);
+    pointer-events: none;
+  }
+  body.drag-over::after {
+    content: "drop audio files to queue"; position: fixed; inset: 0; display: grid; place-items: center;
+    background: rgba(20,10,40,0.55); font-size: 24px; letter-spacing: 2px; z-index: 999; pointer-events: none;
+  }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 900; }
+  .toolbar {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 50;
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(30,24,44,0.6);
+    border: 1px solid var(--glass-border); border-radius: 12px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: 13px;
+  }
+  .toolbar button, .toolbar label {
+    font-family: var(--font); font-size: 13px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.1);
+    color: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: background var(--t-fast), transform var(--t-fast);
+  }
+  .toolbar button:hover, .toolbar label:hover { background: rgba(255,255,255,0.2); }
+  .toolbar button:active { transform: scale(0.97); }
+  .toolbar .toggle.on { background: var(--orange); border-color: var(--orange); }
+  .toolbar .readout { color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+  #fileInput { display: none; }
+  .stage { width: min(1000px, 94vw); perspective: 1300px; padding: 40px 10px; }
+  .overlay {
+    position: relative; transform-style: preserve-3d;
+    transform: rotateY(calc(var(--px, 0) * 14deg)) rotateX(calc(var(--py, 0) * -11deg));
+    transition: transform 0.12s ease-out; will-change: transform;
+  }
+  .overlay.shake { animation: shake 0.45s ease; }
+  @keyframes shake {
+    0%,100% { translate: 0 0; } 15% { translate: -8px 4px; } 30% { translate: 7px -5px; }
+    45% { translate: -6px -3px; } 60% { translate: 5px 4px; } 75% { translate: -3px 2px; }
+  }
+  .layer {
+    transform: translate3d(calc(var(--px,0)*var(--drift,0)*1px), calc(var(--py,0)*var(--drift,0)*1px), var(--depth,0px));
+    transition: transform 0.12s ease-out; will-change: transform;
+  }
+  .meter { --depth: 6px; --drift: 10; margin-bottom: 6px; }
+  .meter .row {
+    display: flex; align-items: center; justify-content: space-between; font-variant-numeric: tabular-nums;
+    font-size: 12px; letter-spacing: 0.5px; color: rgba(255,255,255,0.85); text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+  .meter .read { color: #cfe; display: flex; gap: 10px; }
+  .meter .read span { color: rgba(255,255,255,0.55); }
+  .wave-wrap { --depth: 20px; --drift: 14; position: relative; margin-top: 92px; }
+  .rolling {
+    position: relative; height: 280px; cursor: grab;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  }
+  .rolling.grabbing { cursor: grabbing; }
+  #rolling { width: 100%; height: 100%; display: block; touch-action: none; }
+  .needle {
+    position: absolute; top: 4%; bottom: 4%; left: 50%; width: 2px; margin-left: -1px; background: var(--needle);
+    box-shadow: 0 0 12px 1px rgba(255,211,107,0.95); pointer-events: none; z-index: 3;
+  }
+  .wave-glow {
+    position: absolute; inset: -20px; border-radius: 24px; pointer-events: none; opacity: 0;
+    background: radial-gradient(60% 80% at 50% 50%, var(--glow, #fff), transparent 70%); z-index: 1; transition: opacity 0.1s linear;
+  }
+  .swipe-ghost { position: absolute; inset: 0; z-index: 2; pointer-events: none; animation: swipeLeft 0.55s cubic-bezier(0.4,0,0.2,1) forwards; }
+  @keyframes swipeLeft { from { transform: translateX(0); opacity: 0.95; } to { transform: translateX(-115%); opacity: 0; } }
+  .tstamp {
+    position: absolute; top: 50%; transform: translateY(-50%); font-size: 13px; font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.85); text-shadow: 0 1px 4px rgba(0,0,0,0.6); pointer-events: none; z-index: 3;
+  }
+  .tstamp.start { left: 10px; } .tstamp.end { right: 10px; }
+  .tstamp.now { left: 50%; top: -22px; transform: translateX(-50%); color: var(--needle); font-weight: 700; font-size: 14px; }
+  /* full-track overview — now tight below the rolling waveform, and scrubbable */
+  .overview-wrap { position: relative; height: 54px; margin-top: 6px; cursor: pointer; }
+  #overview { width: 100%; height: 100%; display: block; touch-action: none; }
+  .overview-marker {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--needle);
+    box-shadow: 0 0 6px rgba(255,211,107,0.8); left: 0; pointer-events: none;
+  }
+  .overview-hair { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); left: 0; pointer-events: none; opacity: 0; }
+  .sub-card {
+    --depth: 60px; --drift: 26; position: absolute; top: 118px; left: 50%; margin-left: -145px; width: 290px; z-index: 5;
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--tile-glass);
+    border: 1px solid var(--glass-border); border-radius: 16px; backdrop-filter: blur(10px) saturate(1.15); -webkit-backdrop-filter: blur(10px) saturate(1.15);
+    box-shadow: 0 18px 40px rgba(20,10,40,0.35), inset 0 1px 0 var(--glass-hi);
+  }
+  .sub-card .avatar {
+    width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #cfcfe0, #6d6d84); border: 1px solid rgba(255,255,255,0.5);
+    display: grid; place-items: center; color: rgba(255,255,255,0.9); font-size: 18px;
+  }
+  .sub-card .meta { flex: 1 1 auto; min-width: 0; }
+  .sub-card .name {
+    font-weight: 800; font-size: 16px; letter-spacing: 1px; text-transform: uppercase; color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sub-card .elo-line { font-size: 11px; letter-spacing: 1px; color: rgba(255,255,255,0.78); }
+  .sub-card .tier {
+    position: absolute; bottom: 8px; right: 14px; font-size: 10px; font-weight: 800; letter-spacing: 2px;
+    background: var(--silver); color: #4a4a5a; padding: 2px 7px; border-radius: 5px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+  }
+  .sub-card .pips {
+    flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px; background: rgba(60,50,80,0.4);
+    border: 1px solid rgba(255,255,255,0.25); display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 8px; align-self: flex-start;
+  }
+  .sub-card .pips b { background: #bfa4ff; border-radius: 50%; box-shadow: 0 0 6px rgba(191,164,255,0.8); }
+  .transport {
+    --depth: 42px; --drift: 18; position: relative; z-index: 4; margin: 16px auto 0; width: max-content;
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel-glass);
+    border: 1px solid var(--glass-border); border-radius: 20px; backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1);
+    box-shadow: 0 16px 34px rgba(20,10,40,0.5), inset 0 1px 0 var(--glass-hi);
+  }
+  .tbtn { border: none; cursor: pointer; display: grid; place-items: center; color: #fff; font-family: var(--font); transition: transform var(--t-fast), background var(--t-fast), filter var(--t-fast); }
+  .tbtn:active { transform: scale(0.94); }
+  .tbtn.chip { width: 34px; height: 34px; border-radius: 9px; font-size: 16px; background: rgba(255,255,255,0.16); }
+  .tbtn.chip.green { background: var(--green); }
+  .tbtn.chip:hover { filter: brightness(1.12); }
+  .tbtn.round { width: 34px; height: 34px; border-radius: 50%; background: transparent; }
+  .tbtn.round:hover { background: rgba(255,255,255,0.18); }
+  .tbtn.round svg { width: 20px; height: 20px; fill: #fff; }
+  .tbtn.play { width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,0.95); box-shadow: 0 6px 16px rgba(0,0,0,0.35); }
+  .tbtn.play svg { width: 22px; height: 22px; fill: var(--ink); }
+  .tbtn.stop { width: 34px; height: 34px; border-radius: 9px; background: var(--orange); box-shadow: 0 4px 12px rgba(255,122,47,0.45); }
+  .tbtn.stop::after { content: ""; width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+  .tbtn.flame { width: 34px; height: 34px; border-radius: 9px; background: rgba(255,122,47,0.22); font-size: 17px; }
+  .elo {
+    --depth: 50px; --drift: 22; position: absolute; right: 6px; bottom: 4px; z-index: 6; display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--tile-glass); border: 1px solid var(--glass-border); border-radius: 14px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 14px 30px rgba(20,10,40,0.35), inset 0 1px 0 var(--glass-hi); font-variant-numeric: tabular-nums;
+  }
+  .elo .num { font-size: 22px; font-weight: 800; text-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+  .elo .num.lo { opacity: 0.85; }
+  .elo .thumb { position: relative; width: 78px; height: 54px; border-radius: 10px; overflow: hidden; background: linear-gradient(160deg,#8a6bd6,#d67ab0); border: 1px solid rgba(255,255,255,0.4); display: grid; place-items: center; }
+  .elo .thumb .face { font-size: 40px; transform: scaleX(1.5) scaleY(0.85); filter: contrast(1.1) saturate(1.3); }
+  .elo .thumb .tag { position: absolute; bottom: 2px; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7); }
+  .counter { --depth: 30px; --drift: 12; text-align: center; margin-top: 14px; font-size: 14px; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,0.85); text-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .hint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 12px; letter-spacing: 1px; color: rgba(255,255,255,0.5); text-align: center; }
+</style>
+</head>
+<body>
+  <canvas id="fx"></canvas>
+  <div class="toolbar">
+    <label for="fileInput">＋ Load tracks</label>
+    <input id="fileInput" type="file" accept="audio/*" multiple />
+    <button class="toggle" id="bpmToggle">BPM cue: off</button>
+    <span class="readout" id="readout">no tracks loaded</span>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="overlay" id="overlay">
+      <div class="meter layer">
+        <div class="row">
+          <span id="luRead">-13.8 LU</span>
+          <span class="read" id="analysisRead">BPM — <span>|</span> onset — <span>|</span> cue —</span>
+        </div>
+      </div>
+
+      <div class="wave-wrap layer">
+        <div class="rolling" id="rolling-wrap">
+          <div class="wave-glow" id="waveGlow"></div>
+          <canvas id="rolling"></canvas>
+          <div class="needle"></div>
+          <span class="tstamp start" id="tStart">0:00</span>
+          <span class="tstamp now" id="tNow">0:00</span>
+          <span class="tstamp end" id="tEnd">0:00</span>
+        </div>
+        <div class="overview-wrap" id="overview-wrap">
+          <canvas id="overview"></canvas>
+          <div class="overview-marker" id="overviewMarker"></div>
+          <div class="overview-hair" id="overviewHair"></div>
+        </div>
+      </div>
+
+      <div class="sub-card layer">
+        <div class="avatar">♫</div>
+        <div class="meta">
+          <div class="name" id="trackName">Awaiting upload</div>
+          <div class="elo-line" id="trackElo">ELO 1025</div>
+        </div>
+        <div class="pips"><b></b><b></b><b></b><b></b></div>
+        <span class="tier">SILVER</span>
+      </div>
+
+      <div class="transport layer">
+        <button class="tbtn chip" data-react="clap" title="clap">👏</button>
+        <button class="tbtn chip" data-react="fire" title="fire">🔥</button>
+        <button class="tbtn chip green" data-react="good" title="good">■</button>
+        <button class="tbtn round" id="prev" title="previous / restart"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
+        <button class="tbtn play" id="play" title="play / pause"><svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button class="tbtn round" id="next" title="next submission"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-2 6L5.5 6v12z"/></svg></button>
+        <button class="tbtn stop" id="stop" title="stop"></button>
+        <button class="tbtn flame" data-react="fire" title="heat">🔥</button>
+        <button class="tbtn round" id="reset" title="reset queue"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg></button>
+      </div>
+
+      <div class="elo layer">
+        <span class="num lo">1195</span>
+        <span class="thumb"><span class="face">😎</span><span class="tag">swag</span></span>
+        <span class="num">1300</span>
+      </div>
+
+      <div class="counter layer">Submission <b id="subN">0</b> / <b id="subTotal">0</b></div>
+    </div>
+  </div>
+
+  <div class="hint">load tracks &middot; drag either waveform to scrub &middot; spam reactions to hype the wave &middot; tracks auto-join on the beat</div>
+
+<script>
+"use strict";
+const WINDOW_SECONDS = 5;
+const PEAK_RATE = 220;
+const REACTIONS = {
+  clap: { emoji: "👏", colour: "#ffcf47", rgb: [255,207,71] },
+  fire: { emoji: "🔥", colour: "#ff7a2f", rgb: [255,122,47] },
+  good: { emoji: "💚", colour: "#47d16a", rgb: [71,209,106] },
+};
+
+let ctx = null, master = null;
+const queue = [];
+let bpmMode = false;
+let currentIndex = -1;
+let activeSource = null;
+let scheduledNext = null;
+let anchorCtxTime = 0;
+let anchorPos = 0;
+let state = "idle";
+let dragging = false;
+let tally = { clap: 0, fire: 0, good: 0 };
+
+// hype
+let hype = 0;
+let hypeRGB = [255,255,255];
+let hypeEmoji = "✨";
+
+const $ = (id) => document.getElementById(id);
+const rollCanvas = $("rolling"), rollWrap = $("rolling-wrap");
+const overCanvas = $("overview"), overWrap = $("overview-wrap"), overMarker = $("overviewMarker"), overHair = $("overviewHair");
+const fxCanvas = $("fx");
+const rctx = rollCanvas.getContext("2d");
+const octx = overCanvas.getContext("2d");
+const fxctx = fxCanvas.getContext("2d");
+
+/* ---------- engine ---------- */
+function ensureCtx() {
+  if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination); }
+  if (ctx.state === "suspended") ctx.resume();
+}
+function cueOffset(i) { const t = queue[i]; return bpmMode ? t.bpmCue : t.onsetCue; }
+function makeSource(i) { const s = ctx.createBufferSource(); s.buffer = queue[i].buffer; s.connect(master); return s; }
+function stopSource(s) { if (s) { try { s.onended = null; s.stop(); } catch (e) {} } }
+function clearScheduled() { if (scheduledNext) { stopSource(scheduledNext.source); scheduledNext = null; } }
+
+function startTrack(i, atTime, offset, doScheduleNext = true) {
+  stopSource(activeSource); clearScheduled();
+  currentIndex = i; anchorCtxTime = atTime; anchorPos = offset;
+  activeSource = makeSource(i); activeSource.start(atTime, Math.max(0, offset));
+  state = "playing"; updateCard();
+  if (doScheduleNext) scheduleFollowing();
+}
+function scheduleFollowing() {
+  clearScheduled();
+  const buf = queue[currentIndex].buffer;
+  const endTime = anchorCtxTime + (buf.duration - anchorPos);
+  const nextIdx = currentIndex + 1;
+  if (nextIdx >= queue.length) return;
+  const cue = cueOffset(nextIdx);
+  const src = makeSource(nextIdx); src.start(endTime, cue);
+  scheduledNext = { source: src, index: nextIdx, startTime: endTime, offset: cue };
+}
+function commitTransition() {
+  const topR = topReaction();
+  const n = scheduledNext;
+  activeSource = n.source; currentIndex = n.index; anchorCtxTime = n.startTime; anchorPos = n.offset;
+  scheduledNext = null;
+  runTransitionFX(topR); resetTally(); updateCard(); scheduleFollowing();
+}
+function positionNow() { if (state !== "playing") return anchorPos; return anchorPos + (ctx.currentTime - anchorCtxTime); }
+
+/* ---------- transport ---------- */
+function play() {
+  ensureCtx(); if (!queue.length) return;
+  if (state === "playing") { anchorPos = positionNow(); stopSource(activeSource); clearScheduled(); state = "paused"; }
+  else { const i = currentIndex < 0 ? 0 : currentIndex; const off = (state === "paused") ? anchorPos : cueOffset(i); startTrack(i, ctx.currentTime + 0.03, off); }
+  syncPlayIcon();
+}
+function stopAll() {
+  stopSource(activeSource); clearScheduled();
+  if (currentIndex < 0) currentIndex = 0;
+  anchorPos = queue.length ? cueOffset(currentIndex) : 0; state = "stopped"; syncPlayIcon(); drawFrame();
+}
+function gotoTrack(i, autoplay) {
+  if (!queue.length) return;
+  i = Math.max(0, Math.min(queue.length - 1, i));
+  const shouldPlay = autoplay || state === "playing";
+  if (shouldPlay) { startTrack(i, ctx.currentTime + 0.03, cueOffset(i), true); }
+  else { stopSource(activeSource); clearScheduled(); currentIndex = i; anchorPos = cueOffset(i); if (state === "idle") state = "stopped"; }
+  syncPlayIcon(); updateCard(); drawFrame();
+}
+function prevTrack() {
+  ensureCtx(); if (!queue.length) return;
+  const into = positionNow() - cueOffset(currentIndex);
+  doSwipe();
+  if (into > 2 || currentIndex === 0) gotoTrack(currentIndex);      // restart current
+  else gotoTrack(currentIndex - 1);                                  // step back a track
+}
+function nextTrack() {
+  ensureCtx(); if (!queue.length || currentIndex + 1 >= queue.length) return;
+  doSwipe(); gotoTrack(currentIndex + 1);
+}
+function resetQueue() {
+  stopSource(activeSource); clearScheduled();
+  currentIndex = queue.length ? 0 : -1; anchorPos = queue.length ? cueOffset(0) : 0;
+  state = queue.length ? "stopped" : "idle"; resetTally(); updateCard(); syncPlayIcon(); drawFrame();
+}
+function seekTo(pos, keepPlaying) {
+  ensureCtx();
+  pos = Math.max(0, Math.min(queue[currentIndex].buffer.duration - 0.01, pos));
+  if (keepPlaying) {
+    const now = ctx.currentTime;
+    master.gain.cancelScheduledValues(now); master.gain.setValueAtTime(0.0001, now); master.gain.linearRampToValueAtTime(1, now + 0.04);
+    startTrack(currentIndex, now + 0.005, pos, false);
+  } else { anchorPos = pos; }
+}
+
+/* ---------- analysis ---------- */
+function analyse(buffer) {
+  const data = buffer.getChannelData(0); const sr = buffer.sampleRate; const hop = 512;
+  const frames = Math.floor(data.length / hop);
+  const energy = new Float32Array(frames); let maxE = 0;
+  for (let f = 0; f < frames; f++) { let sum = 0; const base = f * hop; for (let j = 0; j < hop; j++) { const s = data[base + j]; sum += s * s; } const e = Math.sqrt(sum / hop); energy[f] = e; if (e > maxE) maxE = e; }
+  let onF = 0; for (let f = 0; f < frames; f++) { if (energy[f] > 0.08 * maxE) { onF = f; break; } }
+  const onsetCue = (onF * hop) / sr;
+  const flux = new Float32Array(frames); let maxFlux = 0;
+  for (let f = 1; f < frames; f++) { const d = energy[f] - energy[f - 1]; flux[f] = d > 0 ? d : 0; if (flux[f] > maxFlux) maxFlux = flux[f]; }
+  const fps = sr / hop;
+  let bestBpm = 0, bestScore = -1; const minLag = Math.floor(fps * 60 / 180), maxLag = Math.floor(fps * 60 / 70);
+  for (let lag = minLag; lag <= maxLag; lag++) { let score = 0; for (let f = lag; f < frames; f++) score += flux[f] * flux[f - lag]; if (score > bestScore) { bestScore = score; bestBpm = 60 * fps / lag; } }
+  const bpm = Math.round(bestBpm);
+  let dbF = onF; const thr = 0.25 * maxFlux;
+  for (let f = onF; f < frames - 1; f++) { if (flux[f] > thr && flux[f] >= flux[f - 1] && flux[f] >= flux[f + 1]) { dbF = f; break; } }
+  const bpmCue = (dbF * hop) / sr;
+  return { onsetCue, bpm, bpmCue };
+}
+function extractPeaks(buffer) {
+  const data = buffer.getChannelData(0); const sr = buffer.sampleRate;
+  const spp = Math.max(1, Math.floor(sr / PEAK_RATE)); const n = Math.floor(data.length / spp);
+  const peaks = new Float32Array(n); let maxPeak = 0;
+  for (let i = 0; i < n; i++) { let m = 0; const base = i * spp; for (let j = 0; j < spp; j++) { const a = Math.abs(data[base + j]); if (a > m) m = a; } peaks[i] = m; if (m > maxPeak) maxPeak = m; }
+  return { peaks, maxPeak: maxPeak || 1 };
+}
+async function loadFiles(fileList) {
+  ensureCtx();
+  const files = Array.from(fileList).filter(f => f.type.startsWith("audio") || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f.name));
+  if (!files.length) return;
+  $("readout").textContent = "decoding…";
+  for (const file of files) {
+    try {
+      const arr = await file.arrayBuffer(); const buffer = await ctx.decodeAudioData(arr);
+      const { peaks, maxPeak } = extractPeaks(buffer); const a = analyse(buffer);
+      queue.push({ buffer, peaks, maxPeak, duration: buffer.duration, onsetCue: a.onsetCue, bpm: a.bpm, bpmCue: a.bpmCue, name: file.name.replace(/\.[^.]+$/, "") });
+    } catch (e) { console.warn("decode failed for", file.name, e); }
+  }
+  $("subTotal").textContent = queue.length;
+  if (currentIndex < 0 && queue.length) { currentIndex = 0; anchorPos = cueOffset(0); state = "stopped"; }
+  updateCard(); drawFrame();
+}
+
+/* ---------- rendering ---------- */
+function fitCanvas(canvas, cctx) {
+  const dpr = window.devicePixelRatio || 1; const r = canvas.getBoundingClientRect();
+  canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0); return { w: r.width, h: r.height };
+}
+let rollSize = { w: 0, h: 0 }, overSize = { w: 0, h: 0 };
+function resizeCanvases() {
+  rollSize = fitCanvas(rollCanvas, rctx);
+  overSize = fitCanvas(overCanvas, octx);
+  const dpr = window.devicePixelRatio || 1;
+  fxCanvas.width = Math.round(window.innerWidth * dpr); fxCanvas.height = Math.round(window.innerHeight * dpr);
+  fxctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function peakMax(track, t0, t1) {
+  if (!track) return 0;
+  if (t1 <= 0 || t0 >= track.duration) return 0;
+  let i0 = Math.max(0, Math.floor(t0 * PEAK_RATE));
+  let i1 = Math.min(track.peaks.length - 1, Math.ceil(t1 * PEAK_RATE));
+  let m = 0; for (let i = i0; i <= i1; i++) { const p = track.peaks[i]; if (p > m) m = p; }
+  return m / track.maxPeak;
+}
+function blend(a, b, t, alpha) {
+  const r = Math.round(a[0] + (b[0] - a[0]) * t), g = Math.round(a[1] + (b[1] - a[1]) * t), bl = Math.round(a[2] + (b[2] - a[2]) * t);
+  return "rgba(" + r + "," + g + "," + bl + "," + alpha + ")";
+}
+function idleAmp(t) { return (Math.sin(t * 6) * 0.5 + 0.5) * (Math.sin(t * 1.7) * 0.35 + 0.5); }
+
+// SMOOTH rolling waveform: bars anchored to a fixed time-grid so they glide sub-pixel instead of shimmering.
+function drawRolling(pos) {
+  const { w, h } = rollSize; rctx.clearRect(0, 0, w, h);
+  const pps = w / WINDOW_SECONDS; const cx = w / 2; const mid = h / 2; const maxBar = h * 0.46;
+  const BAR_PX = 3, barW = 2; const barDur = BAR_PX / pps;
+  const track = queue[currentIndex];
+  const pastCol = hype > 0.02 ? blend([120,118,145], hypeRGB, hype * 0.35, 0.6) : getVar("--wave-past");
+  const futureCol = hype > 0.02 ? blend([255,255,255], hypeRGB, hype * 0.65, 0.95) : getVar("--wave-future");
+  const kStart = Math.floor((pos - WINDOW_SECONDS / 2) / barDur) - 1;
+  const kEnd = Math.ceil((pos + WINDOW_SECONDS / 2) / barDur) + 1;
+  for (let k = kStart; k <= kEnd; k++) {
+    const bt = k * barDur;
+    const x = cx + (bt - pos) * pps;
+    if (x < -4 || x > w + 4) continue;
+    let amp;
+    if (track) { if (bt < 0 || bt >= track.duration) continue; amp = peakMax(track, bt, bt + barDur); }
+    else amp = idleAmp(bt + pos);
+    const bh = Math.max(1.5, amp * maxBar);
+    rctx.fillStyle = bt <= pos ? pastCol : futureCol;
+    rctx.fillRect(x - barW / 2, mid - bh, barW, bh * 2);
+  }
+}
+function drawOverview(pos) {
+  const { w, h } = overSize; octx.clearRect(0, 0, w, h);
+  const track = queue[currentIndex]; const mid = h / 2, maxBar = h * 0.42;
+  const past = getVar("--wave-past");
+  for (let x = 0; x < w; x += 2) {
+    const t = track ? (x / w) * track.duration : x / 12;
+    const amp = track ? peakMax(track, t, t + (track.duration / w)) : idleAmp(t);
+    const bh = Math.max(1, amp * maxBar);
+    const played = track ? (t <= pos) : false;
+    octx.fillStyle = played ? past : "rgba(255,255,255,0.65)";
+    octx.fillRect(x, mid - bh, 1.4, bh * 2);
+  }
+  if (track) overMarker.style.left = ((pos / track.duration) * w) + "px";
+}
+let _varCache = {};
+function getVar(name) { if (_varCache[name]) return _varCache[name]; const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); _varCache[name] = v; return v; }
+function fmt(t) { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ":" + String(s).padStart(2, "0"); }
+
+function drawFrame() {
+  const track = queue[currentIndex]; const pos = positionNow();
+  drawRolling(pos); drawOverview(pos);
+  if (track) { $("tStart").textContent = fmt(pos - WINDOW_SECONDS / 2); $("tEnd").textContent = fmt(pos + WINDOW_SECONDS / 2); $("tNow").textContent = fmt(pos); }
+  // live waveform glow driven by hype
+  const glow = $("waveGlow");
+  glow.style.setProperty("--glow", "rgb(" + hypeRGB[0] + "," + hypeRGB[1] + "," + hypeRGB[2] + ")");
+  glow.style.opacity = (hype * 0.85).toFixed(3);
+}
+
+/* ---------- particles (confetti + emoji) ---------- */
+const particles = [];
+function spawnBurst(key, sx, sy, level) {
+  const R = REACTIONS[key] || { rgb: [255,255,255], emoji: "✨" };
+  const n = Math.round(5 + level * 30);
+  for (let i = 0; i < n; i++) {
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * (0.5 + level * 2.6);   // spread widens with hype -> explosion
+    const speed = 160 + Math.random() * (240 + level * 720);
+    const confetti = Math.random() < (0.35 + level * 0.5);
+    particles.push({
+      x: sx, y: sy, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, g: 1500,
+      rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 14,
+      life: 0.7 + Math.random() * 0.9, max: 1.6,
+      type: confetti ? "confetti" : "emoji", rgb: R.rgb, emoji: R.emoji,
+      size: confetti ? 6 + Math.random() * 8 : 22 + Math.random() * 16
+    });
+  }
+}
+function floodFromWave(key) {
+  const r = rollCanvas.getBoundingClientRect();
+  const sx = r.left + r.width / 2, sy = r.top + r.height / 2;
+  const R = REACTIONS[key] || { rgb: [255,255,255], emoji: "✨" };
+  const n = key ? 60 : 22;
+  for (let i = 0; i < n; i++) {
+    const ang = Math.random() * 6.28;
+    const speed = 200 + Math.random() * 780;
+    const confetti = Math.random() < 0.6;
+    particles.push({
+      x: sx + (Math.random() - 0.5) * r.width * 0.7, y: sy + (Math.random() - 0.5) * 60,
+      vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed - 200, g: 1400,
+      rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 16,
+      life: 0.9 + Math.random() * 1.1, max: 2.0,
+      type: confetti ? "confetti" : "emoji", rgb: R.rgb, emoji: R.emoji,
+      size: confetti ? 7 + Math.random() * 10 : 24 + Math.random() * 18
+    });
+  }
+}
+let fxHadParticles = false;
+function stepParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.vy += p.g * dt; p.vx *= 0.985; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; p.life -= dt;
+    if (p.life <= 0 || p.y > window.innerHeight + 60) particles.splice(i, 1);
+  }
+}
+function drawParticles() {
+  if (particles.length === 0) { if (fxHadParticles) { fxctx.clearRect(0, 0, window.innerWidth, window.innerHeight); fxHadParticles = false; } return; }
+  fxHadParticles = true;
+  fxctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  for (const p of particles) {
+    const a = Math.max(0, Math.min(1, p.life / p.max));
+    fxctx.globalAlpha = a;
+    fxctx.save(); fxctx.translate(p.x, p.y); fxctx.rotate(p.rot);
+    if (p.type === "confetti") {
+      fxctx.fillStyle = "rgb(" + p.rgb[0] + "," + p.rgb[1] + "," + p.rgb[2] + ")";
+      fxctx.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * 0.62);
+    } else {
+      fxctx.font = p.size + "px sans-serif"; fxctx.textAlign = "center"; fxctx.textBaseline = "middle";
+      fxctx.fillText(p.emoji, 0, 0);
+    }
+    fxctx.restore();
+  }
+  fxctx.globalAlpha = 1;
+}
+
+/* ---------- reactions / hype ---------- */
+function topReaction() { let best = null, n = -1; for (const k in tally) if (tally[k] > n && tally[k] > 0) { n = tally[k]; best = k; } return best; }
+function resetTally() { tally = { clap: 0, fire: 0, good: 0 }; }
+function doSwipe() {
+  try {
+    const ghost = document.createElement("canvas"); ghost.width = rollCanvas.width; ghost.height = rollCanvas.height; ghost.className = "swipe-ghost";
+    ghost.getContext("2d").drawImage(rollCanvas, 0, 0); rollWrap.appendChild(ghost); setTimeout(() => ghost.remove(), 600);
+  } catch (e) {}
+}
+function runTransitionFX(key) {
+  doSwipe();
+  const ov = $("overlay"); ov.classList.remove("shake"); void ov.offsetWidth; ov.classList.add("shake");
+  if (key) { hype = 1; hypeRGB = REACTIONS[key].rgb.slice(); hypeEmoji = REACTIONS[key].emoji; }
+  floodFromWave(key);
+}
+function pressReaction(key, btn) {
+  tally[key] = (tally[key] || 0) + 1;
+  hype = Math.min(1, hype + 0.16);
+  hypeRGB = REACTIONS[key].rgb.slice(); hypeEmoji = REACTIONS[key].emoji;
+  const r = btn.getBoundingClientRect();
+  spawnBurst(key, r.left + r.width / 2, r.top + r.height / 2, hype);
+}
+
+/* ---------- ui sync ---------- */
+const PLAY_PATH = "M8 5v14l11-7z", PAUSE_PATH = "M6 5h4v14H6zm8 0h4v14h-4z";
+function syncPlayIcon() { $("playIcon").setAttribute("d", state === "playing" ? PAUSE_PATH : PLAY_PATH); }
+function updateCard() {
+  const track = queue[currentIndex];
+  if (!track) { $("readout").textContent = "no tracks loaded"; return; }
+  $("trackName").textContent = track.name.slice(0, 22);
+  $("subN").textContent = currentIndex + 1;
+  const cue = bpmMode ? track.bpmCue : track.onsetCue;
+  $("analysisRead").innerHTML = "BPM " + (track.bpm || "—") + " <span>|</span> onset " + fmt(track.onsetCue) + " <span>|</span> cue " + fmt(cue) + (bpmMode ? " (beat)" : "");
+  $("readout").textContent = queue.length + " track" + (queue.length > 1 ? "s" : "") + " · #" + (currentIndex + 1);
+}
+
+/* ---------- main loop ---------- */
+let lastT = performance.now() / 1000;
+function loop() {
+  const now = performance.now() / 1000; let dt = now - lastT; lastT = now; if (dt > 0.05) dt = 0.05;
+  // hype decays
+  if (hype > 0) { hype = Math.max(0, hype - dt * 0.6); if (hype < 0.02) hypeRGB = [255,255,255]; }
+  if (state === "playing" && !dragging) {
+    const track = queue[currentIndex]; const pos = positionNow();
+    if (track && pos >= track.duration - 0.015) { if (scheduledNext) commitTransition(); else stopAll(); }
+  }
+  drawFrame();
+  stepParticles(dt); drawParticles();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- wiring ---------- */
+$("play").onclick = () => play();
+$("stop").onclick = () => stopAll();
+$("prev").onclick = () => prevTrack();
+$("next").onclick = () => nextTrack();
+$("reset").onclick = () => resetQueue();
+$("bpmToggle").onclick = () => {
+  bpmMode = !bpmMode; $("bpmToggle").textContent = "BPM cue: " + (bpmMode ? "on" : "off"); $("bpmToggle").classList.toggle("on", bpmMode);
+  if (scheduledNext) scheduleFollowing(); updateCard();
+};
+document.querySelectorAll("[data-react]").forEach(btn => { btn.addEventListener("click", () => pressReaction(btn.dataset.react, btn)); });
+$("fileInput").addEventListener("change", (e) => loadFiles(e.target.files));
+document.body.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drag-over"); });
+document.body.addEventListener("dragleave", (e) => { if (e.target === document.body) document.body.classList.remove("drag-over"); });
+document.body.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drag-over"); if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+/* ---------- scrub: rolling waveform (relative drag) ---------- */
+let lastScrub = 0;
+let rollDragX = 0, rollDragPos = 0, rollWasPlaying = false;
+rollWrap.addEventListener("pointerdown", (e) => {
+  if (!queue.length) return;
+  dragging = true; rollWrap.classList.add("grabbing"); rollWrap.setPointerCapture(e.pointerId);
+  rollDragX = e.clientX; rollDragPos = positionNow(); rollWasPlaying = state === "playing";
+  if (rollWasPlaying) { anchorPos = positionNow(); stopSource(activeSource); clearScheduled(); }
+});
+rollWrap.addEventListener("pointermove", (e) => {
+  if (!dragging || rollDragX === 0) return;
+  const pps = rollSize.w / WINDOW_SECONDS; const dt = (e.clientX - rollDragX) / pps;
+  let pos = rollDragPos - dt; const dur = queue[currentIndex].buffer.duration; pos = Math.max(0, Math.min(dur - 0.01, pos)); anchorPos = pos;
+  if (rollWasPlaying) { const now = performance.now(); if (now - lastScrub > 90) { lastScrub = now; seekTo(pos, true); anchorPos = pos; } }
+});
+function endRollDrag() {
+  if (rollDragX === 0) return; const pos = anchorPos; rollDragX = 0; dragging = false; rollWrap.classList.remove("grabbing");
+  if (rollWasPlaying) startTrack(currentIndex, ctx.currentTime + 0.01, pos, true); else drawFrame();
+}
+rollWrap.addEventListener("pointerup", endRollDrag);
+rollWrap.addEventListener("pointercancel", endRollDrag);
+
+/* ---------- scrub: overview waveform (absolute seek: click/drag anywhere) ---------- */
+let ovActive = false, ovWasPlaying = false;
+function ovPosFromX(clientX) {
+  const r = overCanvas.getBoundingClientRect(); let frac = (clientX - r.left) / r.width; frac = Math.max(0, Math.min(1, frac));
+  return frac * queue[currentIndex].buffer.duration;
+}
+overWrap.addEventListener("pointerdown", (e) => {
+  if (!queue.length) return;
+  ovActive = true; dragging = true; overWrap.setPointerCapture(e.pointerId); ovWasPlaying = state === "playing";
+  if (ovWasPlaying) { anchorPos = positionNow(); stopSource(activeSource); clearScheduled(); }
+  const pos = ovPosFromX(e.clientX); anchorPos = pos;
+  if (ovWasPlaying) { const now = performance.now(); lastScrub = now; seekTo(pos, true); anchorPos = pos; } else drawFrame();
+});
+overWrap.addEventListener("pointermove", (e) => {
+  const r = overCanvas.getBoundingClientRect(); overHair.style.opacity = "1"; overHair.style.left = (e.clientX - r.left) + "px";
+  if (!ovActive) return;
+  const pos = ovPosFromX(e.clientX); anchorPos = pos;
+  if (ovWasPlaying) { const now = performance.now(); if (now - lastScrub > 90) { lastScrub = now; seekTo(pos, true); anchorPos = pos; } } else drawFrame();
+});
+overWrap.addEventListener("pointerleave", () => { overHair.style.opacity = "0"; });
+function endOvDrag(e) {
+  if (!ovActive) return; ovActive = false; dragging = false;
+  const pos = ovPosFromX(e.clientX || 0); anchorPos = pos;
+  if (ovWasPlaying) startTrack(currentIndex, ctx.currentTime + 0.01, pos, true); else drawFrame();
+}
+overWrap.addEventListener("pointerup", endOvDrag);
+overWrap.addEventListener("pointercancel", endOvDrag);
+
+/* ---------- tilt ---------- */
+const stage = $("stage"), overlay = $("overlay");
+let targetX = 0, targetY = 0, curX = 0, curY = 0;
+stage.addEventListener("pointermove", (e) => { if (dragging) return; const r = stage.getBoundingClientRect(); targetX = (e.clientX - r.left) / r.width - 0.5; targetY = (e.clientY - r.top) / r.height - 0.5; });
+stage.addEventListener("pointerleave", () => { targetX = 0; targetY = 0; });
+(function tiltLoop() { curX += (targetX - curX) * 0.12; curY += (targetY - curY) * 0.12; overlay.style.setProperty("--px", curX.toFixed(4)); overlay.style.setProperty("--py", curY.toFixed(4)); requestAnimationFrame(tiltLoop); })();
+
+/* ---------- boot ---------- */
+window.addEventListener("resize", () => { _varCache = {}; resizeCanvases(); drawFrame(); });
+resizeCanvases(); syncPlayIcon(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>
