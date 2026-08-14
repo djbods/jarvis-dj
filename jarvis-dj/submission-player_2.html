@@ -44,28 +44,6 @@
     display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(30,24,44,0.6);
     border: 1px solid var(--glass-border); border-radius: 12px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: 13px;
   }
-  .sfx-panel {
-    position: fixed; bottom: 16px; right: 16px; z-index: 50;
-    display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(30,24,44,0.7);
-    border: 1px solid var(--glass-border); border-radius: 16px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 12px 32px rgba(20,10,40,0.4);
-  }
-  .sfx-panel .label { font-size: 10px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-  .sfx-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .sfx-btn {
-    font-family: var(--font); font-size: 11px; border: 1px solid var(--glass-border);
-    background: rgba(255,255,255,0.08); color: #fff; padding: 8px 10px; border-radius: 8px;
-    cursor: pointer; transition: all var(--t-fast); text-align: center;
-  }
-  .sfx-btn:hover { background: rgba(255,255,255,0.15); transform: scale(1.02); }
-  .sfx-btn:active, .sfx-btn.active { background: var(--orange); border-color: var(--orange); transform: scale(0.97); }
-  .sfx-btn.filter-btn { background: rgba(71,209,106,0.2); }
-  .sfx-btn.filter-btn:hover { background: rgba(71,209,106,0.3); }
-  .sfx-btn.filter-btn.active { background: var(--green); border-color: var(--green); }
-  .sfx-slider-container { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-  .sfx-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; outline: none; }
-  .sfx-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: var(--needle); border-radius: 50%; cursor: pointer; }
-  .sfx-slider::-moz-range-thumb { width: 14px; height: 14px; background: var(--needle); border-radius: 50%; cursor: pointer; border: none; }
   .toolbar button, .toolbar label {
     font-family: var(--font); font-size: 13px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.1);
     color: #fff; padding: 6px 12px; border-radius: 8px; cursor: pointer; transition: background var(--t-fast), transform var(--t-fast);
@@ -303,21 +281,7 @@
     </div>
   </div>
 
-  <div class="hint">load tracks &middot; drag waveforms to scrub &middot; spam reactions to hype &middot; next track appears in red &middot; use DJ FX panel</div>
-
-  <div class="sfx-panel">
-    <div class="label">DJ FX</div>
-    <div class="sfx-controls">
-      <button class="sfx-btn" id="sfx-echo">Echo</button>
-      <button class="sfx-btn" id="sfx-reverb">Reverb</button>
-      <button class="sfx-btn filter-btn" id="sfx-lowpass">Low Pass</button>
-      <button class="sfx-btn filter-btn" id="sfx-highpass">High Pass</button>
-    </div>
-    <div class="sfx-slider-container">
-      <label style="font-size: 10px; color: var(--muted);">FX Mix</label>
-      <input type="range" class="sfx-slider" id="sfx-mix" min="0" max="100" value="30">
-    </div>
-  </div>
+  <div class="hint">load tracks &middot; drag waveforms to scrub &middot; spam reactions to hype &middot; next track appears in red</div>
 
 <script>
 "use strict";
@@ -334,31 +298,13 @@ const queue = [];
 let bpmMode = false;
 let currentIndex = -1;
 let activeSource = null;
+let activeGain = null; // Gain node for active track (crossfade control)
 let scheduledNext = null;
 let anchorCtxTime = 0;
 let anchorPos = 0;
 let state = "idle";
 let dragging = false;
 let tally = { clap: 0, fire: 0, good: 0 };
-
-// DJ FX system
-let fxBus = null;
-let fxNodes = {
-  echo: null,
-  reverb: null,
-  lowpass: null,
-  highpass: null,
-  mixGain: null,
-  dryGain: null,
-  wetGain: null
-};
-let fxState = {
-  echo: false,
-  reverb: false,
-  lowpass: false,
-  highpass: false,
-  mix: 0.3
-};
 
 // hype
 let hype = 0;
@@ -379,126 +325,11 @@ function ensureCtx() {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     master = ctx.createGain();
     master.gain.value = 1;
-
-    // Initialize DJ FX chain
-    initFX();
-    master.connect(fxNodes.dryGain);
-    fxNodes.dryGain.connect(ctx.destination);
-    fxNodes.wetGain.connect(ctx.destination);
+    master.connect(ctx.destination);
   }
   if (ctx.state === "suspended") ctx.resume();
 }
 
-function initFX() {
-  // Dry/wet mix
-  fxNodes.dryGain = ctx.createGain();
-  fxNodes.wetGain = ctx.createGain();
-  fxNodes.dryGain.gain.value = 1 - fxState.mix;
-  fxNodes.wetGain.gain.value = fxState.mix;
-
-  // FX bus
-  fxBus = ctx.createGain();
-  fxBus.gain.value = 1;
-  fxBus.connect(fxNodes.wetGain);
-
-  // Echo (delay) effect
-  fxNodes.echo = ctx.createDelay(1.5);
-  fxNodes.echo.delayTime.value = 0.4;
-  const echoFeedback = ctx.createGain();
-  echoFeedback.gain.value = 0.4;
-  const echoFilter = ctx.createBiquadFilter();
-  echoFilter.type = "lowpass";
-  echoFilter.frequency.value = 2000;
-
-  fxNodes.echo.connect(echoFeedback);
-  echoFeedback.connect(echoFilter);
-  echoFilter.connect(fxNodes.echo);
-  fxNodes.echo.connect(fxBus);
-
-  // Simple reverb (using convolver would be better, but delay-based works)
-  fxNodes.reverb = ctx.createDelay(0.1);
-  fxNodes.reverb.delayTime.value = 0.02;
-  const reverbFeedback = ctx.createGain();
-  reverbFeedback.gain.value = 0.8;
-  const reverbFilter = ctx.createBiquadFilter();
-  reverbFilter.type = "highpass";
-  reverbFilter.frequency.value = 500;
-
-  fxNodes.reverb.connect(reverbFeedback);
-  reverbFeedback.connect(reverbFilter);
-  reverbFilter.connect(fxNodes.reverb);
-  fxNodes.reverb.connect(fxBus);
-
-  // Low pass filter
-  fxNodes.lowpass = ctx.createBiquadFilter();
-  fxNodes.lowpass.type = "lowpass";
-  fxNodes.lowpass.frequency.value = 20000;
-  fxNodes.lowpass.Q.value = 1;
-  fxNodes.lowpass.connect(fxBus);
-
-  // High pass filter
-  fxNodes.highpass = ctx.createBiquadFilter();
-  fxNodes.highpass.type = "highpass";
-  fxNodes.highpass.frequency.value = 20;
-  fxNodes.highpass.Q.value = 1;
-  fxNodes.highpass.connect(fxBus);
-
-  // Master connection from source to FX
-  master.disconnect();
-  master.connect(fxNodes.dryGain);
-  master.connect(fxNodes.echo);
-  master.connect(fxNodes.reverb);
-  master.connect(fxNodes.lowpass);
-  master.connect(fxNodes.highpass);
-}
-
-function toggleFX(type, button) {
-  fxState[type] = !fxState[type];
-  button.classList.toggle("active", fxState[type]);
-
-  const now = ctx.currentTime;
-
-  switch(type) {
-    case "echo":
-      fxNodes.echo.delayTime.cancelScheduledValues(now);
-      if (fxState[type]) {
-        fxNodes.echo.delayTime.setValueAtTime(0.4, now);
-        fxNodes.echo.delayTime.exponentialRampToValueAtTime(0.001, now + 0.1);
-        fxNodes.echo.delayTime.setValueAtTime(0.4, now + 0.15);
-      } else {
-        fxNodes.echo.delayTime.exponentialRampToValueAtTime(0.001, now + 0.2);
-      }
-      break;
-    case "reverb":
-      // Simple reverb toggle
-      break;
-    case "lowpass":
-      fxNodes.lowpass.frequency.cancelScheduledValues(now);
-      if (fxState[type]) {
-        fxNodes.lowpass.frequency.exponentialRampToValueAtTime(800, now + 0.3);
-      } else {
-        fxNodes.lowpass.frequency.exponentialRampToValueAtTime(20000, now + 0.3);
-      }
-      break;
-    case "highpass":
-      fxNodes.highpass.frequency.cancelScheduledValues(now);
-      if (fxState[type]) {
-        fxNodes.highpass.frequency.exponentialRampToValueAtTime(200, now + 0.3);
-      } else {
-        fxNodes.highpass.frequency.exponentialRampToValueAtTime(20, now + 0.3);
-      }
-      break;
-  }
-}
-
-function updateFXMix(value) {
-  fxState.mix = value / 100;
-  const now = ctx.currentTime;
-  fxNodes.dryGain.gain.cancelScheduledValues(now);
-  fxNodes.wetGain.gain.cancelScheduledValues(now);
-  fxNodes.dryGain.gain.linearRampToValueAtTime(1 - fxState.mix, now + 0.05);
-  fxNodes.wetGain.gain.linearRampToValueAtTime(fxState.mix, now + 0.05);
-}
 function cueOffset(i) {
   const t = queue[i];
   if (!t) return 0;
@@ -516,20 +347,24 @@ function transitionPoint(i) {
 function makeSource(i) {
   const s = ctx.createBufferSource();
   s.buffer = queue[i].buffer;
-  if (ctx && fxNodes.dryGain) {
-    s.connect(master);
-  } else {
-    s.connect(master);
-  }
-  return s;
+
+  // Create individual gain node for this source (crossfade control)
+  const g = ctx.createGain();
+  g.gain.value = 1.0;
+  s.connect(g);
+  g.connect(master);
+
+  return { source: s, gain: g };
 }
-function stopSource(s) { if (s) { try { s.onended = null; s.stop(); } catch (e) {} } }
+function stopSource(s) { if (s) { try { s.source.onended = null; s.gain.disconnect(); s.source.stop(); } catch (e) {} } }
 function clearScheduled() { if (scheduledNext) { stopSource(scheduledNext.source); scheduledNext = null; } }
 
 function startTrack(i, atTime, offset, doScheduleNext = true) {
   stopSource(activeSource); clearScheduled();
   currentIndex = i; anchorCtxTime = atTime; anchorPos = offset;
-  activeSource = makeSource(i); activeSource.start(atTime, Math.max(0, offset));
+  activeSource = makeSource(i);
+  activeSource.source.start(atTime, Math.max(0, offset));
+  activeGain = activeSource.gain;
   state = "playing"; updateCard();
   if (doScheduleNext) scheduleFollowing();
 }
@@ -545,8 +380,10 @@ function scheduleFollowing() {
 
   // Calculate perfect timing for beat alignment (beat 4 → beat 1)
   let transitionTime = currentTransitionPoint;
+  let needsTempoMatch = false;
+  let tempoRampDuration = 0;
 
-  if (bpmMode && track.bpm) {
+  if (bpmMode && track.bpm && nextTrack.bpm) {
     const beatDuration = 60 / track.bpm;
 
     // If we have a detected last beat point, use it
@@ -565,24 +402,88 @@ function scheduleFollowing() {
         transitionTime = currentTransitionPoint + (beatsToBeat4 * beatDuration);
       }
     }
+
+    // Check if we should tempo match
+    const currentPos = positionNow();
+    const timeToTransition = transitionTime - currentPos;
+    const bpmDifference = Math.abs(track.bpm - nextTrack.bpm);
+
+    // Safety margin: need 4+ seconds for tempo matching
+    const SAFETY_MARGIN = 4.0;
+    // Reasonable BPM difference for tempo matching (not too extreme)
+    const MAX_BPM_DIFFERENCE = 30;
+
+    if (timeToTransition >= SAFETY_MARGIN && bpmDifference <= MAX_BPM_DIFFERENCE && bpmDifference > 0) {
+      needsTempoMatch = true;
+      // Tempo ramp duration: 5-10 seconds, but leave 1 second for crossfade
+      tempoRampDuration = Math.min(timeToTransition - 1.0, 10.0);
+    }
   }
 
   const endTime = anchorCtxTime + (transitionTime - anchorPos);
+  const now = ctx.currentTime;
 
-  const src = makeSource(nextIdx);
-  src.start(endTime, nextCue);
+  // Create next source with gain node
+  const nextSource = makeSource(nextIdx);
+  const crossfadeDuration = 0.05; // 50ms crossfade
+
+  // Schedule tempo match if needed
+  if (needsTempoMatch && activeSource && activeSource.source) {
+    const tempoRatio = nextTrack.bpm / track.bpm;
+    const tempoStartTime = now + 0.1; // Small delay before starting tempo ramp
+    const tempoEndTime = tempoStartTime + tempoRampDuration;
+
+    // Exponential ramp to target tempo
+    activeSource.source.playbackRate.cancelScheduledValues(now);
+    activeSource.source.playbackRate.setValueAtTime(track.bpm / track.bpm, tempoStartTime);
+    activeSource.source.playbackRate.exponentialRampToValueAtTime(tempoRatio, tempoEndTime);
+  }
+
+  // Schedule crossfade
+  // Fade out current track
+  if (activeGain) {
+    activeGain.gain.cancelScheduledValues(now);
+    activeGain.gain.setValueAtTime(1.0, endTime);
+    activeGain.gain.exponentialRampToValueAtTime(0.001, endTime + crossfadeDuration);
+  }
+
+  // Start next track at low volume, then fade in
+  nextSource.gain.gain.setValueAtTime(0.001, endTime);
+  nextSource.gain.gain.exponentialRampToValueAtTime(1.0, endTime + crossfadeDuration);
+  nextSource.source.start(endTime, nextCue);
+
   scheduledNext = {
-    source: src,
+    source: nextSource,
     index: nextIdx,
     startTime: endTime,
     offset: nextCue,
-    transitionTime: transitionTime
+    transitionTime: transitionTime,
+    tempoMatch: needsTempoMatch,
+    crossfadeDuration: crossfadeDuration
   };
+
+  // Schedule UI update to happen exactly at transition
+  const transitionDelay = (endTime - now) * 1000;
+  setTimeout(() => {
+    commitTransition();
+  }, Math.max(0, transitionDelay));
 }
 function commitTransition() {
   const topR = topReaction();
   const n = scheduledNext;
-  activeSource = n.source; currentIndex = n.index; anchorCtxTime = n.startTime; anchorPos = n.offset;
+  if (!n) return;
+
+  // Stop old source properly
+  if (activeSource && activeSource !== n.source) {
+    stopSource(activeSource);
+  }
+
+  // Update to new track
+  activeSource = n.source;
+  activeGain = n.source.gain;
+  currentIndex = n.index;
+  anchorCtxTime = n.startTime;
+  anchorPos = n.offset;
   scheduledNext = null;
 
   // Slingshot animation: snap needle back to center
@@ -1181,10 +1082,7 @@ function loop() {
   const now = performance.now() / 1000; let dt = now - lastT; lastT = now; if (dt > 0.05) dt = 0.05;
   // hype decays
   if (hype > 0) { hype = Math.max(0, hype - dt * 0.6); if (hype < 0.02) hypeRGB = [255,255,255]; }
-  if (state === "playing" && !dragging) {
-    const track = queue[currentIndex]; const pos = positionNow();
-    if (track && pos >= track.duration - 0.015) { if (scheduledNext) commitTransition(); else stopAll(); }
-  }
+  // Note: transitions are now handled by scheduled setTimeout, no manual check needed
   drawFrame();
   stepParticles(dt); drawParticles();
   requestAnimationFrame(loop);
@@ -1205,13 +1103,6 @@ $("fileInput").addEventListener("change", (e) => loadFiles(e.target.files));
 document.body.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drag-over"); });
 document.body.addEventListener("dragleave", (e) => { if (e.target === document.body) document.body.classList.remove("drag-over"); });
 document.body.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drag-over"); if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
-
-// DJ FX controls
-$("sfx-echo").onclick = function() { toggleFX("echo", this); };
-$("sfx-reverb").onclick = function() { toggleFX("reverb", this); };
-$("sfx-lowpass").onclick = function() { toggleFX("lowpass", this); };
-$("sfx-highpass").onclick = function() { toggleFX("highpass", this); };
-$("sfx-mix").oninput = function() { updateFXMix(this.value); };
 
 /* ---------- scrub: rolling waveform (relative drag) ---------- */
 let lastScrub = 0;
