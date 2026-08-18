@@ -116,6 +116,36 @@
   }
   .tstamp.start { left: 10px; } .tstamp.end { right: 10px; }
   .tstamp.now { left: 50%; top: -22px; transform: translateX(-50%); color: var(--needle); font-weight: 700; font-size: 14px; }
+  /* live LUFS meter — CDJ-style discrete LED ladder (momentary, K-weighted) */
+  .lufs {
+    position: absolute; top: 0; right: -46px; height: 280px; width: 34px; z-index: 6;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  }
+  .lufs .lufs-label { font-size: 9px; letter-spacing: 1.5px; color: rgba(255,255,255,0.55); }
+  .lufs .lufs-track {
+    flex: 1; width: 26px; display: flex; flex-direction: column-reverse; gap: 2px;
+    padding: 4px; border-radius: 6px; background: rgba(6,5,14,0.55);
+    border: 1px solid var(--glass-border); box-shadow: inset 0 1px 3px rgba(0,0,0,0.6);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .lufs .lufs-tile {
+    flex: 1; border-radius: 2px; background: var(--off);
+    transition: background-color 0.04s linear, box-shadow 0.04s linear;
+  }
+  .lufs .lufs-tile.green { --on: #35e06a; --off: rgba(53,224,106,0.12); }
+  .lufs .lufs-tile.amber { --on: #ffce3a; --off: rgba(255,206,58,0.12); }
+  .lufs .lufs-tile.red   { --on: #ff4646; --off: rgba(255,70,70,0.12); }
+  .lufs .lufs-tile.on {
+    background: var(--on);
+    box-shadow: 0 0 6px var(--on), inset 0 0 2px rgba(255,255,255,0.55);
+  }
+  .lufs .lufs-tile.peak {
+    background: var(--on);
+    box-shadow: 0 0 9px var(--on), inset 0 0 3px rgba(255,255,255,0.85);
+    outline: 1px solid rgba(255,255,255,0.85);
+  }
+  .lufs .lufs-value { font-size: 11px; font-variant-numeric: tabular-nums; color: #dfe7ff; font-weight: 600; }
   /* full-track overview — now tight below the rolling waveform, and scrubbable */
   .overview-wrap { position: relative; height: 54px; margin-top: 6px; cursor: pointer; }
   #overview { width: 100%; height: 100%; display: block; touch-action: none; }
@@ -233,6 +263,11 @@
           <span class="tstamp now" id="tNow">0:00</span>
           <span class="tstamp end" id="tEnd">0:00</span>
         </div>
+        <div class="lufs" id="lufsMeter">
+          <div class="lufs-label">LUFS</div>
+          <div class="lufs-track" id="lufsTrack"></div>
+          <div class="lufs-value" id="lufsValue">-∞</div>
+        </div>
         <div class="overview-wrap" id="overview-wrap">
           <canvas id="overview"></canvas>
           <div class="overview-marker" id="overviewMarker"></div>
@@ -311,6 +346,13 @@ let hype = 0;
 let hypeRGB = [255,255,255];
 let hypeEmoji = "✨";
 
+// live LUFS metering (CDJ-style LED ladder)
+let lufsAnalyser = null, lufsBuf = null;
+let lufsTileEls = [];
+let lufsSmoothed = -70;  // ballistic value (dB) — fast attack, slow release
+let lufsPeakDb = -70;    // peak-hold (dB), falls each frame
+const LUFS_FLOOR = -42, LUFS_CEIL = -3, LUFS_TILES = 18;
+
 const $ = (id) => document.getElementById(id);
 const rollCanvas = $("rolling"), rollWrap = $("rolling-wrap");
 const overCanvas = $("overview"), overWrap = $("overview-wrap"), overMarker = $("overviewMarker"), overHair = $("overviewHair");
@@ -326,6 +368,15 @@ function ensureCtx() {
     master = ctx.createGain();
     master.gain.value = 1;
     master.connect(ctx.destination);
+
+    // LUFS tap: K-weighting pre-filter (BS.1770) → analyser. Measures the program on the
+    // master bus. The analyser is a sink; it needs no onward connection. High-shelf +4dB
+    // and a ~38Hz high-pass approximate ITU K-weighting.
+    const kHi = ctx.createBiquadFilter(); kHi.type = "highshelf"; kHi.frequency.value = 1500; kHi.gain.value = 4;
+    const kLo = ctx.createBiquadFilter(); kLo.type = "highpass"; kLo.frequency.value = 38; kLo.Q.value = 0.5;
+    lufsAnalyser = ctx.createAnalyser(); lufsAnalyser.fftSize = 2048; lufsAnalyser.smoothingTimeConstant = 0;
+    master.connect(kHi); kHi.connect(kLo); kLo.connect(lufsAnalyser);
+    lufsBuf = new Float32Array(lufsAnalyser.fftSize);
   }
   if (ctx.state === "suspended") ctx.resume();
 }
@@ -927,6 +978,50 @@ function drawFrame() {
   glow.style.opacity = (hype * 0.85).toFixed(3);
 }
 
+// Build the LED ladder: bottom green, amber near the top, red at the ceiling.
+function buildLufsTiles() {
+  const track = $("lufsTrack"); if (!track) return;
+  track.innerHTML = ""; lufsTileEls = [];
+  for (let i = 0; i < LUFS_TILES; i++) {
+    const d = document.createElement("div");
+    d.className = "lufs-tile " + (i >= 15 ? "red" : i >= 11 ? "amber" : "green");
+    track.appendChild(d); lufsTileEls.push(d);
+  }
+}
+
+// Live momentary loudness (K-weighted, ITU-R BS.1770). Reads a ~46ms slice each frame
+// and drives the LED ladder with hardware-style ballistics: fast attack, slower release,
+// plus a floating peak-hold LED — snappy like a CDJ master meter, not a laggy bar.
+function updateLufs() {
+  if (!lufsAnalyser) return;
+  lufsAnalyser.getFloatTimeDomainData(lufsBuf);
+  let sum = 0; for (let i = 0; i < lufsBuf.length; i++) { const x = lufsBuf[i]; sum += x * x; }
+  const ms = sum / lufsBuf.length;
+  const inst = ms > 1e-10 ? -0.691 + 10 * Math.log10(ms) : -70;
+
+  // asymmetric ballistics (PPM feel): jump up fast, ease down slow
+  lufsSmoothed += (inst - lufsSmoothed) * (inst > lufsSmoothed ? 0.55 : 0.14);
+  lufsPeakDb = lufsSmoothed >= lufsPeakDb ? lufsSmoothed : Math.max(lufsSmoothed, lufsPeakDb - 0.45);
+
+  const span = LUFS_CEIL - LUFS_FLOOR;
+  const pct = Math.max(0, Math.min(1, (lufsSmoothed - LUFS_FLOOR) / span));
+  const pctPeak = Math.max(0, Math.min(1, (lufsPeakDb - LUFS_FLOOR) / span));
+  const litCount = Math.round(pct * LUFS_TILES);
+  const peakIdx = pctPeak > 0.001 ? Math.max(0, Math.round(pctPeak * LUFS_TILES) - 1) : -1;
+
+  for (let i = 0; i < lufsTileEls.length; i++) {
+    const el = lufsTileEls[i];
+    const isPeak = i === peakIdx;
+    const on = i < litCount || isPeak;
+    if (el._on !== on) { el.classList.toggle("on", on); el._on = on; }
+    if (el._peak !== isPeak) { el.classList.toggle("peak", isPeak); el._peak = isPeak; }
+  }
+
+  const label = lufsSmoothed > LUFS_FLOOR + 0.4 ? lufsSmoothed.toFixed(1) : "-∞";
+  $("lufsValue").textContent = label;
+  $("luRead").textContent = label + " LU";
+}
+
 /* ---------- particles (confetti + emoji) ---------- */
 const particles = [];
 function spawnBurst(key, sx, sy, level) {
@@ -1083,6 +1178,7 @@ function loop() {
   if (hype > 0) { hype = Math.max(0, hype - dt * 0.6); if (hype < 0.02) hypeRGB = [255,255,255]; }
   // Note: transitions are now handled by scheduled setTimeout, no manual check needed
   drawFrame();
+  updateLufs();
   stepParticles(dt); drawParticles();
   requestAnimationFrame(loop);
 }
@@ -1162,7 +1258,7 @@ stage.addEventListener("pointerleave", () => { targetX = 0; targetY = 0; });
 
 /* ---------- boot ---------- */
 window.addEventListener("resize", () => { _varCache = {}; resizeCanvases(); drawFrame(); });
-resizeCanvases(); syncPlayIcon(); requestAnimationFrame(loop);
+buildLufsTiles(); resizeCanvases(); syncPlayIcon(); requestAnimationFrame(loop);
 </script>
 </body>
 </html>
