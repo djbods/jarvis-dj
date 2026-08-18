@@ -86,7 +86,7 @@
   .needle {
     position: absolute; top: 4%; bottom: 4%; left: 50%; width: 2px; margin-left: -1px; background: var(--needle);
     box-shadow: 0 0 12px 1px rgba(255,211,107,0.95); pointer-events: none; z-index: 3;
-    transition: left 0.1s linear;
+    /* no left-transition: it's repositioned every frame, so any easing makes it lag the waveform */
   }
   .transition-marker {
     position: absolute; top: 4%; bottom: 4%; width: 3px; background: rgba(255,80,80,0.8);
@@ -120,7 +120,7 @@
   .overview-wrap { position: relative; height: 54px; margin-top: 6px; cursor: pointer; }
   #overview { width: 100%; height: 100%; display: block; touch-action: none; }
   .overview-marker {
-    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--needle);
+    position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--needle);
     box-shadow: 0 0 6px rgba(255,211,107,0.8); left: 0; pointer-events: none;
   }
   .overview-hair { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); left: 0; pointer-events: none; opacity: 0; }
@@ -488,7 +488,7 @@ function commitTransition() {
   const needle = $("needle");
   needle.style.transition = "left 0.4s cubic-bezier(0.34,1.56,0.64,1)";
   needle.style.left = "50%";
-  setTimeout(() => { needle.style.transition = "left 0.1s linear"; }, 450);
+  setTimeout(() => { needle.style.transition = "none"; }, 450);   // back to exact per-frame tracking
 
   runTransitionFX(topR); resetTally(); updateCard(); scheduleFollowing();
 
@@ -1189,11 +1189,25 @@ overWrap.addEventListener("pointermove", (e) => {
 overWrap.addEventListener("pointerleave", () => { overHair.style.opacity = "0"; });
 function endOvDrag(e) {
   if (!ovActive) return; ovActive = false; dragging = false;
-  const pos = ovPosFromX(e.clientX || 0); anchorPos = pos;
-  if (ovWasPlaying) startTrack(currentIndex, ctx.currentTime + 0.01, pos, true); else drawFrame();
+  // Only recompute from the event when it carries real coords; otherwise keep the
+  // last scrub position (anchorPos) so a synthetic/cancel event can't jump to 0:00.
+  if (e && typeof e.clientX === "number") anchorPos = ovPosFromX(e.clientX);
+  if (ovWasPlaying) startTrack(currentIndex, ctx.currentTime + 0.01, anchorPos, true); else drawFrame();
 }
 overWrap.addEventListener("pointerup", endOvDrag);
 overWrap.addEventListener("pointercancel", endOvDrag);
+
+/* ---------- drag safety net ---------- */
+// A pointer release or lost capture ANYWHERE ends any active scrub, so the app can
+// never get wedged in a drag state — e.g. capture stolen by a re-render, or the button
+// released off the waveform. Every end handler is idempotent, so double-firing (element
+// listener + this) is harmless; the unconditional dragging=false is the final guarantee.
+function endAllDrags(e) { endRollDrag(); endOvDrag(e); dragging = false; rollWrap.classList.remove("grabbing"); }
+window.addEventListener("pointerup", endAllDrags);
+window.addEventListener("pointercancel", endAllDrags);
+window.addEventListener("blur", () => endAllDrags());
+rollWrap.addEventListener("lostpointercapture", endRollDrag);
+overWrap.addEventListener("lostpointercapture", (e) => endOvDrag(e));
 
 /* ---------- tilt ---------- */
 const stage = $("stage"), overlay = $("overlay");
