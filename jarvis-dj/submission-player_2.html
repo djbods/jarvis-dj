@@ -88,7 +88,7 @@
   .needle {
     position: absolute; top: 4%; bottom: 4%; left: 50%; width: 2px; margin-left: -1px; background: var(--needle);
     box-shadow: 0 0 12px 1px rgba(255,211,107,0.95); pointer-events: none; z-index: 3;
-    transition: left 0.1s linear;
+    /* no left-transition: it's repositioned every frame, so any easing makes it lag the waveform */
   }
   .transition-marker {
     position: absolute; top: 4%; bottom: 4%; width: 3px; background: rgba(255,80,80,0.8);
@@ -152,7 +152,7 @@
   .overview-wrap { position: relative; height: 54px; margin-top: 6px; cursor: pointer; }
   #overview { width: 100%; height: 100%; display: block; touch-action: none; }
   .overview-marker {
-    position: absolute; top: 0; bottom: 0; width: 2px; background: var(--needle);
+    position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--needle);
     box-shadow: 0 0 6px rgba(255,211,107,0.8); left: 0; pointer-events: none;
   }
   .overview-hair { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); left: 0; pointer-events: none; opacity: 0; }
@@ -541,7 +541,7 @@ function commitTransition() {
   const needle = $("needle");
   needle.style.transition = "left 0.4s cubic-bezier(0.34,1.56,0.64,1)";
   needle.style.left = "50%";
-  setTimeout(() => { needle.style.transition = "left 0.1s linear"; }, 450);
+  setTimeout(() => { needle.style.transition = "none"; }, 450);   // back to exact per-frame tracking
 
   runTransitionFX(topR); resetTally(); updateCard(); scheduleFollowing();
 
@@ -952,32 +952,74 @@ function drawRolling(pos) {
     }
   }
 }
+// Overview waveform cache. The full-track waveform is static per track, so we
+// rasterise it ONCE (per track + per canvas size) into two offscreen bitmaps —
+// one in the played colour, one in the upcoming colour — instead of re-scanning
+// ~450 columns of peaks every frame. Each frame then just blits + clips.
+let _ovPast = null, _ovFuture = null, _ovIndex = -1, _ovW = 0;
+function buildOverviewCache() {
+  const track = queue[currentIndex]; const { w, h } = overSize;
+  if (!track || w <= 0) { _ovPast = _ovFuture = null; _ovIndex = -1; _ovW = 0; return; }
+  const dpr = window.devicePixelRatio || 1;
+  const mk = () => {
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    const cc = c.getContext("2d"); cc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { c, cc };
+  };
+  const past = mk(), future = mk();
+  const mid = h / 2, maxBar = h * 0.42;
+  const pastCol = getVar("--wave-past"), futCol = "rgba(255,255,255,0.65)";
+  past.cc.fillStyle = pastCol; future.cc.fillStyle = futCol;
+  for (let x = 0; x < w; x += 2) {
+    const t = (x / w) * track.duration;
+    const amp = peakMax(track, t, t + (track.duration / w));
+    const bh = Math.max(1, amp * maxBar);
+    past.cc.fillRect(x, mid - bh, 1.4, bh * 2);
+    future.cc.fillRect(x, mid - bh, 1.4, bh * 2);
+  }
+  _ovPast = past.c; _ovFuture = future.c; _ovIndex = currentIndex; _ovW = w;
+}
 function drawOverview(pos) {
   const { w, h } = overSize; octx.clearRect(0, 0, w, h);
   const track = queue[currentIndex]; const mid = h / 2, maxBar = h * 0.42;
-  const past = getVar("--wave-past");
-  for (let x = 0; x < w; x += 2) {
-    const t = track ? (x / w) * track.duration : x / 12;
-    const amp = track ? peakMax(track, t, t + (track.duration / w)) : idleAmp(t);
-    const bh = Math.max(1, amp * maxBar);
-    const played = track ? (t <= pos) : false;
-    octx.fillStyle = played ? past : "rgba(255,255,255,0.65)";
-    octx.fillRect(x, mid - bh, 1.4, bh * 2);
+  if (!track) {                             // idle (pre-load) animation — no cache
+    octx.fillStyle = "rgba(255,255,255,0.65)";
+    for (let x = 0; x < w; x += 2) { const bh = Math.max(1, idleAmp(x / 12) * maxBar); octx.fillRect(x, mid - bh, 1.4, bh * 2); }
+    return;
   }
-  if (track) overMarker.style.left = ((pos / track.duration) * w) + "px";
+  // Rebuild the cache lazily whenever the track or the canvas width changes.
+  if (_ovIndex !== currentIndex || _ovW !== w || !_ovFuture) buildOverviewCache();
+  if (!_ovFuture) return;                    // cache couldn't build (0-width canvas) — skip
+  const mx = Math.max(0, Math.min(w, (pos / track.duration) * w));
+  octx.drawImage(_ovFuture, 0, 0, w, h);                 // upcoming portion (whole)
+  octx.save(); octx.beginPath(); octx.rect(0, 0, mx, h); octx.clip();
+  octx.drawImage(_ovPast, 0, 0, w, h);                   // played portion (clipped left of playhead)
+  octx.restore();
+  overMarker.style.left = mx + "px";
 }
 let _varCache = {};
 function getVar(name) { if (_varCache[name]) return _varCache[name]; const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); _varCache[name] = v; return v; }
 function fmt(t) { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ":" + String(s).padStart(2, "0"); }
 
+// Cache hot-path element refs so drawFrame() isn't doing getElementById every frame.
+const _elTStart = $("tStart"), _elTEnd = $("tEnd"), _elTNow = $("tNow"), _elGlow = $("waveGlow");
+let _lastTStart = "", _lastTEnd = "", _lastTNow = "", _lastGlow = -1;
 function drawFrame() {
   const track = queue[currentIndex]; const pos = positionNow();
   drawRolling(pos); drawOverview(pos);
-  if (track) { $("tStart").textContent = fmt(pos - WINDOW_SECONDS / 2); $("tEnd").textContent = fmt(pos + WINDOW_SECONDS / 2); $("tNow").textContent = fmt(pos); }
-  // live waveform glow driven by hype
-  const glow = $("waveGlow");
-  glow.style.setProperty("--glow", "rgb(" + hypeRGB[0] + "," + hypeRGB[1] + "," + hypeRGB[2] + ")");
-  glow.style.opacity = (hype * 0.85).toFixed(3);
+  if (track) {                              // timestamps tick ~1×/sec — only write on change
+    const a = fmt(pos - WINDOW_SECONDS / 2), b = fmt(pos + WINDOW_SECONDS / 2), c = fmt(pos);
+    if (a !== _lastTStart) { _elTStart.textContent = a; _lastTStart = a; }
+    if (b !== _lastTEnd) { _elTEnd.textContent = b; _lastTEnd = b; }
+    if (c !== _lastTNow) { _elTNow.textContent = c; _lastTNow = c; }
+  }
+  // live waveform glow driven by hype — skip writes once it has decayed to nothing
+  if (hype > 0.001 || _lastGlow !== 0) {
+    _elGlow.style.setProperty("--glow", "rgb(" + hypeRGB[0] + "," + hypeRGB[1] + "," + hypeRGB[2] + ")");
+    _elGlow.style.opacity = (hype * 0.85).toFixed(3);
+    _lastGlow = hype > 0.001 ? hype : 0;
+  }
 }
 
 // Build the LED ladder: bottom green, amber near the top, red at the ceiling.
@@ -1245,18 +1287,51 @@ overWrap.addEventListener("pointermove", (e) => {
 overWrap.addEventListener("pointerleave", () => { overHair.style.opacity = "0"; });
 function endOvDrag(e) {
   if (!ovActive) return; ovActive = false; dragging = false;
-  const pos = ovPosFromX(e.clientX || 0); anchorPos = pos;
-  if (ovWasPlaying) startTrack(currentIndex, ctx.currentTime + 0.01, pos, true); else drawFrame();
+  // Only recompute from the event when it carries real coords; otherwise keep the
+  // last scrub position (anchorPos) so a synthetic/cancel event can't jump to 0:00.
+  if (e && typeof e.clientX === "number") anchorPos = ovPosFromX(e.clientX);
+  if (ovWasPlaying) startTrack(currentIndex, ctx.currentTime + 0.01, anchorPos, true); else drawFrame();
 }
 overWrap.addEventListener("pointerup", endOvDrag);
 overWrap.addEventListener("pointercancel", endOvDrag);
+
+/* ---------- drag safety net ---------- */
+// A pointer release or lost capture ANYWHERE ends any active scrub, so the app can
+// never get wedged in a drag state — e.g. capture stolen by a re-render, or the button
+// released off the waveform. Every end handler is idempotent, so double-firing (element
+// listener + this) is harmless; the unconditional dragging=false is the final guarantee.
+function endAllDrags(e) { endRollDrag(); endOvDrag(e); dragging = false; rollWrap.classList.remove("grabbing"); }
+window.addEventListener("pointerup", endAllDrags);
+window.addEventListener("pointercancel", endAllDrags);
+window.addEventListener("blur", () => endAllDrags());
+rollWrap.addEventListener("lostpointercapture", endRollDrag);
+overWrap.addEventListener("lostpointercapture", (e) => endOvDrag(e));
 
 /* ---------- tilt ---------- */
 const stage = $("stage"), overlay = $("overlay");
 let targetX = 0, targetY = 0, curX = 0, curY = 0;
 stage.addEventListener("pointermove", (e) => { if (dragging) return; const r = stage.getBoundingClientRect(); targetX = (e.clientX - r.left) / r.width - 0.5; targetY = (e.clientY - r.top) / r.height - 0.5; });
 stage.addEventListener("pointerleave", () => { targetX = 0; targetY = 0; });
-(function tiltLoop() { curX += (targetX - curX) * 0.12; curY += (targetY - curY) * 0.12; overlay.style.setProperty("--px", curX.toFixed(4)); overlay.style.setProperty("--py", curY.toFixed(4)); requestAnimationFrame(tiltLoop); })();
+// Only touch the DOM while the tilt is actually moving. When it has settled at the
+// target we stop writing --px/--py, so the browser stops re-compositing every
+// backdrop-filter glass panel each frame (the main visual cost). A pointermove
+// nudges the target and the loop naturally wakes back up.
+let _tiltSettled = false;
+(function tiltLoop() {
+  const dx = targetX - curX, dy = targetY - curY;
+  if (Math.abs(dx) > 0.0004 || Math.abs(dy) > 0.0004) {
+    curX += dx * 0.12; curY += dy * 0.12;
+    overlay.style.setProperty("--px", curX.toFixed(4));
+    overlay.style.setProperty("--py", curY.toFixed(4));
+    _tiltSettled = false;
+  } else if (!_tiltSettled) {                 // land exactly on target once, then idle
+    curX = targetX; curY = targetY;
+    overlay.style.setProperty("--px", curX.toFixed(4));
+    overlay.style.setProperty("--py", curY.toFixed(4));
+    _tiltSettled = true;
+  }
+  requestAnimationFrame(tiltLoop);
+})();
 
 /* ---------- boot ---------- */
 window.addEventListener("resize", () => { _varCache = {}; resizeCanvases(); drawFrame(); });
