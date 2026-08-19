@@ -337,6 +337,7 @@ let currentIndex = -1;
 let activeSource = null;
 let activeGain = null; // Gain node for active track (crossfade control)
 let scheduledNext = null;
+let fadingOut = null;  // the outgoing source during a crossfade, so teardown can hard-stop it
 let anchorCtxTime = 0;
 let anchorPos = 0;
 let state = "idle";
@@ -411,9 +412,17 @@ function makeSource(i) {
 }
 function stopSource(s) { if (s) { try { s.source.onended = null; s.gain.disconnect(); s.source.stop(); } catch (e) {} } }
 function clearScheduled() { if (scheduledNext) { stopSource(scheduledNext.source); scheduledNext = null; } }
+// Single source of truth for tearing down playback: kills the active track, the
+// pre-scheduled next track, AND any outgoing track still fading out. Every transport
+// action routes through this so a source can never be orphaned and left playing.
+function stopActiveAndScheduled() {
+  stopSource(activeSource);
+  stopSource(fadingOut); fadingOut = null;
+  clearScheduled();
+}
 
 function startTrack(i, atTime, offset, doScheduleNext = true) {
-  stopSource(activeSource); clearScheduled();
+  stopActiveAndScheduled();
   currentIndex = i; anchorCtxTime = atTime; anchorPos = offset;
   activeSource = makeSource(i);
   activeSource.source.start(atTime, Math.max(0, offset));
@@ -433,8 +442,6 @@ function scheduleFollowing() {
 
   // Calculate perfect timing for beat alignment (beat 4 → beat 1)
   let transitionTime = currentTransitionPoint;
-  let needsTempoMatch = false;
-  let tempoRampDuration = 0;
 
   if (bpmMode && track.bpm && nextTrack.bpm) {
     const beatDuration = 60 / track.bpm;
@@ -455,49 +462,20 @@ function scheduleFollowing() {
         transitionTime = currentTransitionPoint + (beatsToBeat4 * beatDuration);
       }
     }
-
-    // Check if we should tempo match (only if playing)
-    if (state === "playing") {
-      const currentPos = positionNow();
-      const timeToTransition = transitionTime - currentPos;
-      const bpmDifference = Math.abs(track.bpm - nextTrack.bpm);
-
-      // Safety margin: need 4+ seconds for tempo matching
-      const SAFETY_MARGIN = 4.0;
-      // Reasonable BPM difference for tempo matching (not too extreme)
-      const MAX_BPM_DIFFERENCE = 30;
-
-      if (timeToTransition >= SAFETY_MARGIN && bpmDifference <= MAX_BPM_DIFFERENCE && bpmDifference > 0) {
-        needsTempoMatch = true;
-        // Tempo ramp duration: 5-10 seconds, but leave 1 second for crossfade
-        tempoRampDuration = Math.min(timeToTransition - 1.0, 10.0);
-      }
-    }
   }
 
   const endTime = anchorCtxTime + (transitionTime - anchorPos);
-  const now = ctx.currentTime;
 
   // Create next source with gain node
   const nextSource = makeSource(nextIdx);
   const crossfadeDuration = 0.05; // 50ms crossfade
 
-  // Schedule tempo match if needed
-  if (needsTempoMatch && activeSource && activeSource.source) {
-    const tempoRatio = nextTrack.bpm / track.bpm;
-    const tempoStartTime = now + 0.1; // Small delay before starting tempo ramp
-    const tempoEndTime = tempoStartTime + tempoRampDuration;
-
-    // Exponential ramp to target tempo
-    activeSource.source.playbackRate.cancelScheduledValues(now);
-    activeSource.source.playbackRate.setValueAtTime(track.bpm / track.bpm, tempoStartTime);
-    activeSource.source.playbackRate.exponentialRampToValueAtTime(tempoRatio, tempoEndTime);
-  }
-
   // Schedule crossfade
-  // Fade out current track
+  // Fade out current track. Cancel from just after this track's own fade-in has
+  // completed (anchorCtxTime is when it started) — cancelling from `now` would wipe
+  // the still-in-progress fade-in of a freshly-transitioned track, leaving it silent.
   if (activeGain) {
-    activeGain.gain.cancelScheduledValues(now);
+    activeGain.gain.cancelScheduledValues(anchorCtxTime + crossfadeDuration + 0.001);
     activeGain.gain.setValueAtTime(1.0, endTime);
     activeGain.gain.exponentialRampToValueAtTime(0.001, endTime + crossfadeDuration);
   }
@@ -513,23 +491,31 @@ function scheduleFollowing() {
     startTime: endTime,
     offset: nextCue,
     transitionTime: transitionTime,
-    tempoMatch: needsTempoMatch,
     crossfadeDuration: crossfadeDuration
   };
-
-  // Schedule UI update to happen exactly at transition
-  const transitionDelay = (endTime - now) * 1000;
-  setTimeout(() => {
-    commitTransition();
-  }, Math.max(0, transitionDelay));
+  // The commit (swapping references + UI) is driven by loop() when ctx.currentTime
+  // reaches startTime — no setTimeout, so stale timers can never fire a phantom transition.
 }
 function commitTransition() {
   const topR = topReaction();
   const n = scheduledNext;
   if (!n) return;
 
-  // The old source will naturally fade out via the crossfade we scheduled
-  // Just update our references to the new source
+  // Stop the outgoing source once the crossfade has finished. The scheduled gain
+  // ramp only takes it to ~-60dB and never stops it, so without this the old track
+  // keeps playing (audibly, alongside the new one) and leaks a source every cut.
+  // Held in fadingOut so any transport action mid-crossfade can hard-stop it too.
+  const oldSource = activeSource;
+  fadingOut = oldSource;
+  if (oldSource) {
+    const stopAt = n.startTime + (n.crossfadeDuration || 0.05);
+    try {
+      oldSource.source.onended = () => { try { oldSource.gain.disconnect(); } catch (e) {} if (fadingOut === oldSource) fadingOut = null; };
+      oldSource.source.stop(stopAt);
+    } catch (e) { fadingOut = null; }
+  } else { fadingOut = null; }
+
+  // Update our references to the new source
   activeSource = n.source;
   activeGain = n.source.gain;
   currentIndex = n.index;
@@ -559,12 +545,12 @@ function positionNow() { if (state !== "playing") return anchorPos; return ancho
 /* ---------- transport ---------- */
 function play() {
   ensureCtx(); if (!queue.length) return;
-  if (state === "playing") { anchorPos = positionNow(); stopSource(activeSource); clearScheduled(); state = "paused"; }
+  if (state === "playing") { anchorPos = positionNow(); stopActiveAndScheduled(); state = "paused"; }
   else { const i = currentIndex < 0 ? 0 : currentIndex; const off = (state === "paused") ? anchorPos : cueOffset(i); startTrack(i, ctx.currentTime + 0.03, off); }
   syncPlayIcon();
 }
 function stopAll() {
-  stopSource(activeSource); clearScheduled();
+  stopActiveAndScheduled();
   if (currentIndex < 0) currentIndex = 0;
   anchorPos = queue.length ? cueOffset(currentIndex) : 0; state = "stopped"; syncPlayIcon(); drawFrame();
 }
@@ -573,7 +559,7 @@ function gotoTrack(i, autoplay) {
   i = Math.max(0, Math.min(queue.length - 1, i));
   const shouldPlay = autoplay || state === "playing";
   if (shouldPlay) { startTrack(i, ctx.currentTime + 0.03, cueOffset(i), true); }
-  else { stopSource(activeSource); clearScheduled(); currentIndex = i; anchorPos = cueOffset(i); if (state === "idle") state = "stopped"; }
+  else { stopActiveAndScheduled(); currentIndex = i; anchorPos = cueOffset(i); if (state === "idle") state = "stopped"; }
   syncPlayIcon(); updateCard(); drawFrame();
 }
 function prevTrack() {
@@ -588,7 +574,7 @@ function nextTrack() {
   doSwipe(); gotoTrack(currentIndex + 1);
 }
 function resetQueue() {
-  stopSource(activeSource); clearScheduled();
+  stopActiveAndScheduled();
   currentIndex = queue.length ? 0 : -1; anchorPos = queue.length ? cueOffset(0) : 0;
   state = queue.length ? "stopped" : "idle"; resetTally(); updateCard(); syncPlayIcon(); drawFrame();
 }
@@ -1220,7 +1206,9 @@ function loop() {
   const now = performance.now() / 1000; let dt = now - lastT; lastT = now; if (dt > 0.05) dt = 0.05;
   // hype decays
   if (hype > 0) { hype = Math.max(0, hype - dt * 0.6); if (hype < 0.02) hypeRGB = [255,255,255]; }
-  // Note: transitions are now handled by scheduled setTimeout, no manual check needed
+  // Commit a scheduled transition the instant we reach it. Loop-driven (not a timer)
+  // so it stays in lock-step with the audio clock and can't fire after a teardown.
+  if (state === "playing" && ctx && scheduledNext && ctx.currentTime >= scheduledNext.startTime) commitTransition();
   drawFrame();
   updateLufs();
   stepParticles(dt); drawParticles();
@@ -1250,7 +1238,7 @@ rollWrap.addEventListener("pointerdown", (e) => {
   if (!queue.length) return;
   dragging = true; rollWrap.classList.add("grabbing"); rollWrap.setPointerCapture(e.pointerId);
   rollDragX = e.clientX; rollDragPos = positionNow(); rollWasPlaying = state === "playing";
-  if (rollWasPlaying) { anchorPos = positionNow(); stopSource(activeSource); clearScheduled(); }
+  if (rollWasPlaying) { anchorPos = positionNow(); stopActiveAndScheduled(); }
 });
 rollWrap.addEventListener("pointermove", (e) => {
   if (!dragging || rollDragX === 0) return;
@@ -1274,7 +1262,7 @@ function ovPosFromX(clientX) {
 overWrap.addEventListener("pointerdown", (e) => {
   if (!queue.length) return;
   ovActive = true; dragging = true; overWrap.setPointerCapture(e.pointerId); ovWasPlaying = state === "playing";
-  if (ovWasPlaying) { anchorPos = positionNow(); stopSource(activeSource); clearScheduled(); }
+  if (ovWasPlaying) { anchorPos = positionNow(); stopActiveAndScheduled(); }
   const pos = ovPosFromX(e.clientX); anchorPos = pos;
   if (ovWasPlaying) { const now = performance.now(); lastScrub = now; seekTo(pos, true); anchorPos = pos; } else drawFrame();
 });
