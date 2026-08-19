@@ -346,7 +346,7 @@
         <button class="tbtn play" id="play" title="play / pause"><svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg></button>
         <button class="tbtn round" id="next" title="next submission"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-2 6L5.5 6v12z"/></svg></button>
         <button class="tbtn stop" id="stop" title="stop"></button>
-        <button class="tbtn flame" data-react="fire" title="heat">🔥</button>
+        <button class="tbtn flame" data-react="heat" title="heat">🔥</button>
         <button class="tbtn round" id="reset" title="reset queue"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg></button>
       </div>
 
@@ -384,6 +384,7 @@ const REACTIONS = {
   clap: { emoji: "👏", colour: "#ffcf47", rgb: [255,207,71] },
   fire: { emoji: "🔥", colour: "#ff7a2f", rgb: [255,122,47] },
   good: { emoji: "💚", colour: "#47d16a", rgb: [71,209,106] },
+  heat: { emoji: "🔥", colour: "#ff5a2f", rgb: [255,90,47] },
 };
 
 let ctx = null, master = null;
@@ -399,7 +400,8 @@ let anchorCtxTime = 0;
 let anchorPos = 0;
 let state = "idle";
 let dragging = false;
-let tally = { clap: 0, fire: 0, good: 0 };
+const freshTally = () => { const t = {}; for (const k in REACTIONS) t[k] = 0; return t; };
+let tally = freshTally();
 
 // hype
 let hype = 0;
@@ -1227,7 +1229,7 @@ function drawParticles() {
 
 /* ---------- reactions / hype ---------- */
 function topReaction() { let best = null, n = -1; for (const k in tally) if (tally[k] > n && tally[k] > 0) { n = tally[k]; best = k; } return best; }
-function resetTally() { tally = { clap: 0, fire: 0, good: 0 }; }
+function resetTally() { tally = freshTally(); }
 function doSwipe() {
   try {
     const ghost = document.createElement("canvas"); ghost.width = rollCanvas.width; ghost.height = rollCanvas.height; ghost.className = "swipe-ghost";
@@ -1363,9 +1365,30 @@ function openEmojiPicker(key) {
   $("emojiModal").hidden = false;
 }
 function closeEmojiPicker() { $("emojiModal").hidden = true; editingKey = null; }
+// Sample the emoji's own sprite for a representative colour so the waveform fill + particle
+// tint follow the chosen emoji. Vivid (saturated) pixels are weighted higher so a mostly-red
+// emoji reads red, not a muddy grey average.
+function emojiAverageRGB(emoji) {
+  const spr = emojiSprite(emoji);
+  let data;
+  try { data = spr.getContext("2d").getImageData(0, 0, spr.width, spr.height).data; }
+  catch (err) { return null; }
+  let r = 0, g = 0, b = 0, wsum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3]; if (a < 40) continue;
+    const R = data[i], G = data[i + 1], B = data[i + 2];
+    const sat = Math.max(R, G, B) - Math.min(R, G, B);
+    const w = (a / 255) * (0.2 + sat / 255);
+    r += R * w; g += G * w; b += B * w; wsum += w;
+  }
+  if (wsum <= 0) return null;
+  return [Math.round(r / wsum), Math.round(g / wsum), Math.round(b / wsum)];
+}
 function applyReactionEmoji(key, e) {
   if (!REACTIONS[key] || !e) return;
   REACTIONS[key].emoji = e;
+  const rgb = emojiAverageRGB(e);
+  if (rgb) { REACTIONS[key].rgb = rgb; REACTIONS[key].colour = "rgb(" + rgb.join(",") + ")"; }
   document.querySelectorAll('[data-react="' + key + '"]').forEach(b => { b.textContent = e; });
 }
 $("emojiModalClose").onclick = closeEmojiPicker;
