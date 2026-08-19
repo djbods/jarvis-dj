@@ -333,6 +333,7 @@ const REACTIONS = {
 let ctx = null, master = null;
 const queue = [];
 let bpmMode = false;
+const PHRASE_BEATS = 16; // 4 bars — the grid transitions snap to, so we cut at a phrase end (set 32 for longer phrases)
 let currentIndex = -1;
 let activeSource = null;
 let activeGain = null; // Gain node for active track (crossfade control)
@@ -387,8 +388,9 @@ function ensureCtx() {
 function cueOffset(i) {
   const t = queue[i];
   if (!t) return 0;
-  if (bpmMode && t.phraseStart !== null) return t.phraseStart;
-  if (bpmMode && t.firstKickPoint !== null) return t.firstKickPoint;
+  // Start the incoming track on its first big loud transient near the start,
+  // not on the first musical phrase (phraseStart/firstKickPoint deliberately skip
+  // the first ~8 beats, which made transitions land 5-10s into the track).
   if (bpmMode) return t.bpmCue;
   return t.onsetCue;
 }
@@ -440,28 +442,24 @@ function scheduleFollowing() {
   const nextCue = cueOffset(nextIdx);
   const currentTransitionPoint = transitionPoint(currentIndex);
 
-  // Calculate perfect timing for beat alignment (beat 4 → beat 1)
+  // Cut at a phrase boundary, never mid-phrase.
   let transitionTime = currentTransitionPoint;
 
   if (bpmMode && track.bpm && nextTrack.bpm) {
     const beatDuration = 60 / track.bpm;
+    const phraseDuration = beatDuration * PHRASE_BEATS;
+    const phraseRef = track.phraseStart !== null ? track.phraseStart : 0;
 
-    // If we have a detected last beat point, use it
-    if (track.lastBeatPoint !== null) {
-      transitionTime = track.lastBeatPoint;
-    } else {
-      // Fallback: find the nearest beat 4 (multiple of 4 beats from a reference)
-      // Use phrase start as reference if available
-      const referencePoint = track.phraseStart || 0;
-      const beatsFromReference = Math.round((currentTransitionPoint - referencePoint) / beatDuration);
-      const beatInBar = beatsFromReference % 4;
+    // Aim for the last musical bar near the end (or the track end), then snap it
+    // onto the phrase grid so the outgoing track always finishes its phrase.
+    const rawTarget = track.lastBeatPoint !== null ? track.lastBeatPoint : currentTransitionPoint;
+    let phrases = Math.round((rawTarget - phraseRef) / phraseDuration);
 
-      // Calculate time to next beat 4
-      if (beatInBar !== 3) {
-        const beatsToBeat4 = 3 - beatInBar;
-        transitionTime = currentTransitionPoint + (beatsToBeat4 * beatDuration);
-      }
+    // Never run past the end of the track — step back a phrase if we would.
+    while (phrases > 0 && phraseRef + phrases * phraseDuration > track.duration - 0.05) {
+      phrases--;
     }
+    transitionTime = phraseRef + phrases * phraseDuration;
   }
 
   const endTime = anchorCtxTime + (transitionTime - anchorPos);
