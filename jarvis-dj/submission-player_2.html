@@ -1365,13 +1365,21 @@ function openEmojiPicker(key) {
   $("emojiModal").hidden = false;
 }
 function closeEmojiPicker() { $("emojiModal").hidden = true; editingKey = null; }
-// Sample the emoji's own sprite for a representative colour so the waveform fill + particle
-// tint follow the chosen emoji. Vivid (saturated) pixels are weighted higher so a mostly-red
-// emoji reads red, not a muddy grey average.
+// Sample a representative colour for the emoji so the waveform fill + particle tint follow
+// the chosen emoji. Vivid (saturated) pixels are weighted higher so a mostly-red emoji reads
+// red, not a muddy grey average. IMPORTANT: this rasterises into a throwaway canvas, NOT the
+// cached render sprite — calling getImageData on the sprite would force it off the GPU and
+// make every per-frame drawImage of it re-upload (that was the post-change burst choppiness).
 function emojiAverageRGB(emoji) {
-  const spr = emojiSprite(emoji);
+  const px = 44;
+  const c = document.createElement("canvas");
+  c.width = c.height = px;
+  const cc = c.getContext("2d", { willReadFrequently: true });
+  cc.font = Math.round(px * 0.8) + "px sans-serif";
+  cc.textAlign = "center"; cc.textBaseline = "middle";
+  cc.fillText(emoji, px / 2, px / 2);
   let data;
-  try { data = spr.getContext("2d").getImageData(0, 0, spr.width, spr.height).data; }
+  try { data = cc.getImageData(0, 0, px, px).data; }
   catch (err) { return null; }
   let r = 0, g = 0, b = 0, wsum = 0;
   for (let i = 0; i < data.length; i += 4) {
@@ -1389,6 +1397,7 @@ function applyReactionEmoji(key, e) {
   REACTIONS[key].emoji = e;
   const rgb = emojiAverageRGB(e);
   if (rgb) { REACTIONS[key].rgb = rgb; REACTIONS[key].colour = "rgb(" + rgb.join(",") + ")"; }
+  emojiSprite(e);   // pre-warm the render sprite so the first burst frame doesn't build it
   document.querySelectorAll('[data-react="' + key + '"]').forEach(b => { b.textContent = e; });
 }
 $("emojiModalClose").onclick = closeEmojiPicker;
