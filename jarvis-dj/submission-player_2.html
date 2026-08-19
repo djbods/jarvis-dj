@@ -7,12 +7,12 @@
 <style>
   :root {
     --bg-1: #3a2d5c; --bg-2: #6a4a7a; --bg-3: #c98ba0; --bg-glow: rgba(255,170,200,0.35);
-    --tile-glass: rgba(228,228,235,0.10);
-    --panel-glass: rgba(60,56,78,0.55);
+    --tile-glass: rgba(220,222,230,0.13);
+    --panel-glass: rgba(52,52,62,0.58);
     --glass-border: rgba(255,255,255,0.28);
     --glass-hi: rgba(255,255,255,0.5);
-    --wave-past: rgba(120,118,145,0.5);
-    --wave-future: rgba(255,255,255,0.92);
+    --wave-past: rgba(20,18,28,0.9);
+    --wave-future: rgba(255,255,255,0.95);
     --needle: #ffd36b;
     --text: #fff; --muted: rgba(255,255,255,0.62); --ink: #2a2436;
     --orange: #ff7a2f; --green: #47d16a; --yellow: #ffcf47;
@@ -78,6 +78,15 @@
   .meter .read { color: #cfe; display: flex; gap: 10px; }
   .meter .read span { color: rgba(255,255,255,0.55); }
   .wave-wrap { --depth: 20px; --drift: 14; position: relative; margin-top: 92px; }
+  /* gray plate the waveform sits on (screenshot look): dark played bars + white upcoming
+     bars read against a neutral gray field. Painted behind .rolling / .overview-wrap. */
+  .wave-plate {
+    position: absolute; left: -18px; right: -18px; top: -18px; bottom: -6px; z-index: 0;
+    background: linear-gradient(180deg, rgba(128,130,142,0.60), rgba(104,106,118,0.55));
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 22px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 18px 40px rgba(20,10,40,0.30);
+  }
   .rolling {
     position: relative; height: 280px; cursor: grab;
     -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
@@ -255,6 +264,7 @@
       </div>
 
       <div class="wave-wrap layer">
+        <div class="wave-plate"></div>
         <div class="rolling" id="rolling-wrap">
           <div class="wave-glow" id="waveGlow"></div>
           <canvas id="rolling"></canvas>
@@ -324,6 +334,8 @@
 "use strict";
 const WINDOW_SECONDS = 5;
 const PEAK_RATE = 220;
+// reaction strobe: a press flashes the whole waveform in the emoji colour a few times
+const STROBE_MS = 480, STROBE_HALF = 55;   // ~4–5 on/off flashes over ~half a second
 const REACTIONS = {
   clap: { emoji: "👏", colour: "#ffcf47", rgb: [255,207,71] },
   fire: { emoji: "🔥", colour: "#ff7a2f", rgb: [255,122,47] },
@@ -348,6 +360,8 @@ let tally = { clap: 0, fire: 0, good: 0 };
 let hype = 0;
 let hypeRGB = [255,255,255];
 let hypeEmoji = "✨";
+// reaction strobe (emoji-coloured flash across the waveform)
+let strobeRGB = null, strobeStart = -1e9;
 
 // live LUFS metering (CDJ-style LED ladder)
 let lufsAnalyser = null, lufsBuf = null;
@@ -839,11 +853,20 @@ function idleAmp(t) { return (Math.sin(t * 6) * 0.5 + 0.5) * (Math.sin(t * 1.7) 
 function drawRolling(pos) {
   const { w, h } = rollSize; rctx.clearRect(0, 0, w, h);
   const pps = w / WINDOW_SECONDS; const cx = w / 2; const mid = h / 2; const maxBar = h * 0.46;
-  const BAR_PX = 3, barW = 2; const barDur = BAR_PX / pps;
+  const BAR_PX = 7, barW = 5; const barDur = BAR_PX / pps;   // chunky/blocky bars (fewer marks)
   const track = queue[currentIndex];
   const nextTrack = queue[currentIndex + 1];
-  const pastCol = hype > 0.02 ? blend([120,118,145], hypeRGB, hype * 0.35, 0.6) : getVar("--wave-past");
-  const futureCol = hype > 0.02 ? blend([255,255,255], hypeRGB, hype * 0.65, 0.95) : getVar("--wave-future");
+  // reaction strobe: flash every bar in the emoji colour, on/off, for ~half a second
+  const nowMs = performance.now();
+  const strobeOn = strobeRGB && (nowMs - strobeStart) < STROBE_MS &&
+                   (Math.floor((nowMs - strobeStart) / STROBE_HALF) % 2 === 0);
+  let pastCol, futureCol;
+  if (strobeOn) {
+    pastCol = futureCol = "rgb(" + strobeRGB[0] + "," + strobeRGB[1] + "," + strobeRGB[2] + ")";
+  } else {
+    pastCol = hype > 0.02 ? blend([20,18,28], hypeRGB, hype * 0.3, 0.9) : getVar("--wave-past");
+    futureCol = hype > 0.02 ? blend([255,255,255], hypeRGB, hype * 0.6, 0.95) : getVar("--wave-future");
+  }
   const nextCol = "rgba(255,120,120,0.7)";
 
   // Calculate transition point
@@ -1136,6 +1159,7 @@ function pressReaction(key, btn) {
   tally[key] = (tally[key] || 0) + 1;
   hype = Math.min(1, hype + 0.16);
   hypeRGB = REACTIONS[key].rgb.slice(); hypeEmoji = REACTIONS[key].emoji;
+  strobeRGB = REACTIONS[key].rgb.slice(); strobeStart = performance.now();   // kick off the flash
   const r = btn.getBoundingClientRect();
   spawnBurst(key, r.left + r.width / 2, r.top + r.height / 2, hype);
 }
