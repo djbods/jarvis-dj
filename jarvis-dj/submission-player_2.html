@@ -58,8 +58,16 @@
   .stage { width: min(1000px, calc(100vw - 160px)); perspective: 1300px; padding: 40px 10px; }
   .overlay {
     position: relative; transform-style: preserve-3d;
-    transform: rotateY(calc(var(--px, 0) * 14deg)) rotateX(calc(var(--py, 0) * -11deg));
-    transition: transform 0.12s ease-out; will-change: transform;
+    /* fixed perspective tilt — the panel sits at a static angle (no mouse parallax).
+       a slow "ocean roll" (--rock, written only while playing) layers on top. origin
+       sits low near the transport so controls barely move while the top sways. */
+    --tilt-x: 8deg; --tilt-z: -1.4deg;
+    transform-origin: 50% 82%;
+    transform:
+      rotateX(var(--tilt-x))
+      rotateZ(calc(var(--tilt-z) + var(--rock, 0) * 1deg))
+      rotateY(calc(var(--rock, 0) * 0.5deg));
+    will-change: transform;
   }
   .overlay.shake { animation: shake 0.45s ease; }
   @keyframes shake {
@@ -166,7 +174,7 @@
   }
   .overview-hair { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); left: 0; pointer-events: none; opacity: 0; }
   .sub-card {
-    --depth: 60px; --drift: 26; position: absolute; top: 118px; left: 50%; margin-left: -145px; width: 290px; z-index: 5;
+    --depth: 60px; --drift: 26; position: absolute; top: 118px; left: 50%; margin-left: -185px; width: 370px; z-index: 5;
     display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--tile-glass);
     border: 1px solid var(--glass-border); border-radius: 16px; backdrop-filter: blur(10px) saturate(1.15); -webkit-backdrop-filter: blur(10px) saturate(1.15);
     box-shadow: 0 18px 40px rgba(20,10,40,0.35), inset 0 1px 0 var(--glass-hi);
@@ -1170,7 +1178,7 @@ function syncPlayIcon() { $("playIcon").setAttribute("d", state === "playing" ? 
 function updateCard() {
   const track = queue[currentIndex];
   if (!track) { $("readout").textContent = "no tracks loaded"; return; }
-  $("trackName").textContent = track.name.slice(0, 22);
+  $("trackName").textContent = track.name.slice(0, 30);
   $("subN").textContent = currentIndex + 1;
   const cue = cueOffset(currentIndex);
   const trans = transitionPoint(currentIndex);
@@ -1235,6 +1243,7 @@ function loop() {
   if (state === "playing" && ctx && scheduledNext && ctx.currentTime >= scheduledNext.startTime) commitTransition();
   drawFrame();
   updateLufs();
+  updateRock(now);
   stepParticles(dt); drawParticles();
   requestAnimationFrame(loop);
 }
@@ -1319,31 +1328,24 @@ window.addEventListener("blur", () => endAllDrags());
 rollWrap.addEventListener("lostpointercapture", endRollDrag);
 overWrap.addEventListener("lostpointercapture", (e) => endOvDrag(e));
 
-/* ---------- tilt ---------- */
-const stage = $("stage"), overlay = $("overlay");
-let targetX = 0, targetY = 0, curX = 0, curY = 0;
-stage.addEventListener("pointermove", (e) => { if (dragging) return; const r = stage.getBoundingClientRect(); targetX = (e.clientX - r.left) / r.width - 0.5; targetY = (e.clientY - r.top) / r.height - 0.5; });
-stage.addEventListener("pointerleave", () => { targetX = 0; targetY = 0; });
-// Only touch the DOM while the tilt is actually moving. When it has settled at the
-// target we stop writing --px/--py, so the browser stops re-compositing every
-// backdrop-filter glass panel each frame (the main visual cost). A pointermove
-// nudges the target and the loop naturally wakes back up.
-let _tiltSettled = false;
-(function tiltLoop() {
-  const dx = targetX - curX, dy = targetY - curY;
-  if (Math.abs(dx) > 0.0004 || Math.abs(dy) > 0.0004) {
-    curX += dx * 0.12; curY += dy * 0.12;
-    overlay.style.setProperty("--px", curX.toFixed(4));
-    overlay.style.setProperty("--py", curY.toFixed(4));
-    _tiltSettled = false;
-  } else if (!_tiltSettled) {                 // land exactly on target once, then idle
-    curX = targetX; curY = targetY;
-    overlay.style.setProperty("--px", curX.toFixed(4));
-    overlay.style.setProperty("--py", curY.toFixed(4));
-    _tiltSettled = true;
+/* ---------- panel motion ----------
+   No mouse parallax: the tilt is a fixed baseline (see .overlay CSS). While a track is
+   playing we layer a slow, tiny "ocean roll" on top via --rock. We only write the var
+   while playing and land on 0 once when it stops, so idle frames don't re-composite
+   every backdrop-filter glass panel (the main visual cost). */
+const overlay = $("overlay");
+let _rockIdle = false;
+function updateRock(t) {
+  if (state === "playing") {
+    // two detuned sines → a gentle, non-repeating sway (~±1°), like a ship at anchor
+    const r = Math.sin(t * 0.9) * 0.7 + Math.sin(t * 0.37 + 1.3) * 0.3;
+    overlay.style.setProperty("--rock", r.toFixed(4));
+    _rockIdle = false;
+  } else if (!_rockIdle) {
+    overlay.style.setProperty("--rock", "0");
+    _rockIdle = true;
   }
-  requestAnimationFrame(tiltLoop);
-})();
+}
 
 /* ---------- boot ---------- */
 window.addEventListener("resize", () => { _varCache = {}; resizeCanvases(); drawFrame(); });
