@@ -200,6 +200,10 @@
     background: radial-gradient(circle at 35% 30%, #cfcfe0, #6d6d84); border: 1px solid rgba(255,255,255,0.5);
     display: grid; place-items: center; color: rgba(255,255,255,0.9); font-size: 18px;
   }
+  /* embedded cover art fills the round avatar; object-fit:cover crops to the circle so
+     non-square artwork is never stretched */
+  .sub-card .avatar.has-thumb { background: none; }
+  .sub-card .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
   .sub-card .meta { flex: 1 1 auto; min-width: 0; }
   .sub-card .name {
     font-weight: 800; font-size: 16px; letter-spacing: 1px; text-transform: uppercase; color: #fff;
@@ -320,7 +324,7 @@
       </div>
 
       <div class="sub-card layer">
-        <div class="avatar">♫</div>
+        <div class="avatar" id="trackAvatar">♫</div>
         <div class="meta">
           <div class="name" id="trackName">Awaiting upload</div>
           <div class="elo-line" id="trackElo">ELO 1025</div>
@@ -350,11 +354,11 @@
         <button class="tbtn round" id="reset" title="reset queue"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg></button>
       </div>
 
-      <div class="elo layer">
+      <!-- <div class="elo layer">
         <span class="num lo">1195</span>
         <span class="thumb"><span class="face">😎</span><span class="tag">swag</span></span>
         <span class="num">1300</span>
-      </div>
+      </div> -->
 
       <div class="counter layer">Submission <b id="subN">0</b> / <b id="subTotal">0</b></div>
     </div>
@@ -855,6 +859,43 @@ function extractPeaks(buffer) {
   for (let i = 0; i < n; i++) { let m = 0; const base = i * spp; for (let j = 0; j < spp; j++) { const a = Math.abs(data[base + j]); if (a > m) m = a; } peaks[i] = m; if (m > maxPeak) maxPeak = m; }
   return { peaks, maxPeak: maxPeak || 1 };
 }
+// Pull embedded cover art out of an ID3v2 tag (APIC frame, or PIC in v2.2) and return an
+// object URL, or null if there's no tag / no picture. Covers MP3 and any container that
+// front-loads an ID3v2 tag; other formats just fall back to the ♫ placeholder. Must run
+// BEFORE decodeAudioData, which detaches the ArrayBuffer.
+function extractArtwork(arrayBuffer) {
+  try {
+    const dv = new DataView(arrayBuffer);
+    if (dv.byteLength < 10) return null;
+    if (dv.getUint8(0) !== 0x49 || dv.getUint8(1) !== 0x44 || dv.getUint8(2) !== 0x33) return null; // "ID3"
+    const version = dv.getUint8(3);
+    const synch = (o) => (dv.getUint8(o) << 21) | (dv.getUint8(o + 1) << 14) | (dv.getUint8(o + 2) << 7) | dv.getUint8(o + 3);
+    const str = (o, n) => { let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(dv.getUint8(o + i)); return s; };
+    const tagEnd = 10 + synch(6);
+    let pos = 10;
+    while (pos + 10 <= tagEnd) {
+      let id, size, headLen;
+      if (version === 2) { id = str(pos, 3); size = (dv.getUint8(pos + 3) << 16) | (dv.getUint8(pos + 4) << 8) | dv.getUint8(pos + 5); headLen = 6; }
+      else { id = str(pos, 4); size = version === 4 ? synch(pos + 4) : dv.getUint32(pos + 4); headLen = 10; }
+      if (!id.trim() || size <= 0 || pos + headLen + size > tagEnd) break;
+      if (id === "APIC" || id === "PIC") {
+        let p = pos + headLen;
+        const enc = dv.getUint8(p); p++;
+        let mime;
+        if (id === "PIC") { const fmt = str(p, 3).toLowerCase(); p += 3; mime = fmt === "png" ? "image/png" : "image/jpeg"; }
+        else { let m = ""; while (p < tagEnd && dv.getUint8(p) !== 0) { m += String.fromCharCode(dv.getUint8(p)); p++; } p++; mime = m || "image/jpeg"; }
+        p++; // picture type byte
+        if (enc === 1 || enc === 2) { while (p + 1 < tagEnd && !(dv.getUint8(p) === 0 && dv.getUint8(p + 1) === 0)) p += 2; p += 2; }
+        else { while (p < tagEnd && dv.getUint8(p) !== 0) p++; p++; }
+        const imgLen = (pos + headLen + size) - p;
+        if (imgLen <= 0) return null;
+        return URL.createObjectURL(new Blob([new Uint8Array(arrayBuffer, p, imgLen)], { type: mime }));
+      }
+      pos += headLen + size;
+    }
+    return null;
+  } catch (e) { return null; }
+}
 async function loadFiles(fileList) {
   ensureCtx();
   const files = Array.from(fileList).filter(f => f.type.startsWith("audio") || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f.name));
@@ -862,10 +903,12 @@ async function loadFiles(fileList) {
   $("readout").textContent = "decoding…";
   for (const file of files) {
     try {
-      const arr = await file.arrayBuffer(); const buffer = await ctx.decodeAudioData(arr);
+      const arr = await file.arrayBuffer();
+      const thumb = extractArtwork(arr);          // before decodeAudioData detaches arr
+      const buffer = await ctx.decodeAudioData(arr);
       const { peaks, maxPeak } = extractPeaks(buffer); const a = analyse(buffer);
       queue.push({
-        buffer, peaks, maxPeak, duration: buffer.duration,
+        buffer, peaks, maxPeak, duration: buffer.duration, thumb,
         onsetCue: a.onsetCue, bpm: a.bpm, bpmCue: a.bpmCue,
         beatGrid: a.beatGrid, lastBeatPoint: a.lastBeatPoint, firstKickPoint: a.firstKickPoint, phraseStart: a.phraseStart,
         name: file.name.replace(/\.[^.]+$/, "")
@@ -1257,6 +1300,10 @@ function updateCard() {
   const track = queue[currentIndex];
   if (!track) { $("readout").textContent = "no tracks loaded"; return; }
   $("trackName").textContent = track.name.slice(0, 30);
+  const av = $("trackAvatar");
+  if (track.thumb) {
+    if (av.dataset.thumb !== track.thumb) { av.innerHTML = '<img alt="cover" src="' + track.thumb + '">'; av.dataset.thumb = track.thumb; av.classList.add("has-thumb"); }
+  } else if (av.dataset.thumb) { av.textContent = "♫"; av.removeAttribute("data-thumb"); av.classList.remove("has-thumb"); }
   $("subN").textContent = currentIndex + 1;
   const cue = cueOffset(currentIndex);
   const trans = transitionPoint(currentIndex);
