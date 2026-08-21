@@ -195,7 +195,22 @@
   .sub-card .meta { flex: 1 1 auto; min-width: 0; }
   .sub-card .name {
     font-weight: 800; font-size: 16px; letter-spacing: 1px; text-transform: uppercase; color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4); white-space: nowrap; overflow: hidden;
+  }
+  /* inner span carries the text so it can slide when the name overflows the card;
+     the ping-pong keyframe reveals the tail then returns, spotify-style */
+  .sub-card .name .marquee-inner { display: inline-block; white-space: nowrap; }
+  .sub-card .name.is-scrolling .marquee-inner {
+    animation: track-marquee var(--marquee-duration, 8s) ease-in-out infinite;
+  }
+  @keyframes track-marquee {
+    0%, 14%   { transform: translateX(0); }
+    46%, 54%  { transform: translateX(var(--marquee-shift, 0)); }
+    86%, 100% { transform: translateX(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sub-card .name.is-scrolling .marquee-inner { animation: none; }
+    .sub-card .name { text-overflow: ellipsis; }
   }
   .sub-card .elo-line { font-size: 11px; letter-spacing: 1px; color: rgba(255,255,255,0.78); }
   .sub-card .tier {
@@ -373,7 +388,7 @@
       <div class="sub-card layer">
         <div class="avatar" id="trackAvatar">♫</div>
         <div class="meta">
-          <div class="name" id="trackName">Awaiting upload</div>
+          <div class="name" id="trackName"><span class="marquee-inner">Awaiting upload</span></div>
           <div class="elo-line" id="trackElo">ELO 1025</div>
         </div>
         <div class="pips"><b></b><b></b><b></b><b></b></div>
@@ -1332,11 +1347,31 @@ function pressReaction(key, btn) {
 /* ---------- ui sync ---------- */
 const PLAY_PATH = "M8 5v14l11-7z", PAUSE_PATH = "M6 5h4v14H6zm8 0h4v14h-4z";
 function syncPlayIcon() { $("playIcon").setAttribute("d", state === "playing" ? PAUSE_PATH : PLAY_PATH); }
+/* drop the full name into the sliding inner span, then measure whether it
+   overflows the card. only tracks wider than their container get animated, and
+   the scroll duration scales with the overflow so speed stays constant. */
+function setTrackName(name) {
+  const box = $("trackName");
+  let inner = box.querySelector(".marquee-inner");
+  if (!inner) { inner = document.createElement("span"); inner.className = "marquee-inner"; box.appendChild(inner); }
+  inner.textContent = name;
+  box.classList.remove("is-scrolling");
+  box.style.removeProperty("--marquee-shift");
+  box.style.removeProperty("--marquee-duration");
+  requestAnimationFrame(() => {
+    const overflow = inner.scrollWidth - box.clientWidth;
+    if (overflow > 4) {
+      box.style.setProperty("--marquee-shift", (-overflow) + "px");
+      box.style.setProperty("--marquee-duration", Math.max(6, overflow / 22 + 4).toFixed(1) + "s");
+      box.classList.add("is-scrolling");
+    }
+  });
+}
 function updateCard() {
   highlightActiveRow();
   const track = queue[currentIndex];
   if (!track) { $("readout").textContent = "no tracks loaded"; return; }
-  $("trackName").textContent = track.name.slice(0, 30);
+  setTrackName(track.name);
   const av = $("trackAvatar");
   if (track.thumb) {
     if (av.dataset.thumb !== track.thumb) { av.innerHTML = '<img alt="cover" src="' + track.thumb + '">'; av.dataset.thumb = track.thumb; av.classList.add("has-thumb"); }
